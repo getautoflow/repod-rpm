@@ -1,0 +1,173 @@
+# =============================================================================
+# RPM Repo Manager — .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SECRETS & CONFIGURATION LOCALE — ne jamais committer
+# -----------------------------------------------------------------------------
+.env
+backend.env
+
+# Fichiers de données runtime (générés automatiquement au premier démarrage)
+repos/settings.json
+
+# -----------------------------------------------------------------------------
+# CLÉS CRYPTOGRAPHIQUES & IDENTITÉ
+# -----------------------------------------------------------------------------
+.gnupg/
+*.gpg
+*.kbx
+*.asc
+gnupg/
+repos/gnupg/
+
+# Clés SSH
+backend/ssh/id_*
+backend/ssh/*.pem
+backend/ssh/*.key
+backend/ssh/known_hosts
+backend/ssh/known_hosts.old
+
+# Certificats
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+
+# -----------------------------------------------------------------------------
+# DONNÉES DU DÉPÔT (volumes Docker — données runtime, pas du code)
+# -----------------------------------------------------------------------------
+repos/pool/
+repos/almalinux8/
+repos/rocky8/
+repos/centos-stream9/
+repos/oraclelinux8/
+repos/fedora/
+repos/opensuse-leap/
+repos/opensuse-leap-15.5/
+repos/opensuse-leap-15.6/
+repos/opensuse-tumbleweed/
+repos/manifests/
+repos/package-index/
+repos/imports/
+repos/staging/
+repos/audit/
+repos/auth/
+repos/security/
+repos/logs/
+repos/conf/
+repos/db/
+repos/dists/
+
+# Bases de données antivirus / vulnérabilités (volumineuses, téléchargées à l'init)
+repos/clamav-db/
+repos/grype-db/
+clamav-db/
+*.cvd
+*.cld
+
+# -----------------------------------------------------------------------------
+# BASES DE DONNÉES LOCALES
+# -----------------------------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+
+# -----------------------------------------------------------------------------
+# PYTHON
+# -----------------------------------------------------------------------------
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# -----------------------------------------------------------------------------
+# NODE / REACT (frontend)
+# -----------------------------------------------------------------------------
+node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Sites web / docs générés
+site/
+web/dist/
+web/node_modules/
+web/.astro/
+
+# -----------------------------------------------------------------------------
+# DOCKER
+# -----------------------------------------------------------------------------
+.docker/
+
+# -----------------------------------------------------------------------------
+# ÉDITEURS & IDE
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.settings/
+.classpath
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# -----------------------------------------------------------------------------
+# CLAUDE CODE (IA — fichiers de session locale)
+# -----------------------------------------------------------------------------
+.claude/
+
+# -----------------------------------------------------------------------------
+# TEMPORAIRE & CACHE
+# -----------------------------------------------------------------------------
+tmp/
+temp/
+cache/
+*.tmp
+*.bak
+*.orig
+*.log
+
+# -----------------------------------------------------------------------------
+# OS
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini

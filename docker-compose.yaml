@@ -1,0 +1,109 @@
+networks:
+  vagrant_network:
+
+services:
+  rpm-repo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vagrant-rpm-repo
+    container_name: depot-rpm
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${RPM_PORT:-80}:80"
+    volumes:
+      - ./.gnupg:/root/.gnupg:rw
+      - ./repos/gnupg:/repos/gnupg:rw
+      # Distributions RPM
+      - ./repos/almalinux8:/usr/share/nginx/html/repos/almalinux8
+      - ./repos/rocky8:/usr/share/nginx/html/repos/rocky8
+      - ./repos/centos-stream9:/usr/share/nginx/html/repos/centos-stream9
+      - ./repos/oraclelinux8:/usr/share/nginx/html/repos/oraclelinux8
+      - ./repos/fedora:/usr/share/nginx/html/repos/fedora
+      - ./repos/opensuse-leap-15.5:/usr/share/nginx/html/repos/opensuse-leap-15.5
+      - ./repos/opensuse-leap-15.6:/usr/share/nginx/html/repos/opensuse-leap-15.6
+      - ./repos/opensuse-leap:/usr/share/nginx/html/repos/opensuse-leap
+      - ./repos/opensuse-tumbleweed:/usr/share/nginx/html/repos/opensuse-tumbleweed
+      - ./nginx/repo.conf:/etc/nginx/conf.d/repo.conf:ro
+      - ./scripts/add-rpm.sh:/scripts/add-rpm.sh
+      - ./repos/logs:/var/log/nginx
+    restart: unless-stopped
+    networks:
+      - vagrant_network
+
+  backend:
+    build: ./backend
+    container_name: backend-api
+    depends_on:
+      - rpm-repo
+    env_file: backend.env
+    environment:
+      ENV: production
+      POOL_DIR: /repos/pool
+      MANIFEST_DIR: /repos/manifests
+      STAGING_INCOMING: /repos/staging/incoming
+      STAGING_QUARANTINE: /repos/staging/quarantine
+      AUDIT_DIR: /repos/audit
+      INDEX_PATH: /repos/manifests/index.json
+      ADD_RPM_SCRIPT: /scripts/add-rpm.sh
+      INDEX_DIR: /repos/package-index
+      IMPORTS_DIR: /repos/imports
+      CLAMAV_DB_DIR: /var/lib/clamav
+      AUTH_DB_PATH: /repos/auth/users.db
+      SETTINGS_PATH: /repos/settings.json
+      GRYPE_DB_CACHE_DIR: /repos/grype-db
+      SECURITY_DIR: /repos/security
+      NGINX_LOGS_DIR: /repos/logs
+      GNUPG_HOME: /repos/gnupg
+      TRUSTED_PROXIES: "127.0.0.1,172.16.0.0/12,192.168.0.0/16"
+      REPO_BASE: /repos
+    volumes:
+      - ./scripts:/scripts
+      - ./repos/pool:/repos/pool
+      - ./repos/manifests:/repos/manifests
+      - ./repos/staging:/repos/staging
+      - ./repos/audit:/repos/audit
+      - ./repos/package-index:/repos/package-index
+      - ./repos/imports:/repos/imports
+      - ./repos/clamav-db:/var/lib/clamav
+      - ./repos/grype-db:/repos/grype-db
+      - ./repos/auth:/repos/auth
+      - ./repos/settings.json:/repos/settings.json
+      - ./repos/security:/repos/security
+      - ./repos/logs:/repos/logs
+      - ./repos/gnupg:/repos/gnupg:rw
+      # Distributions RPM (partagées avec rpm-repo)
+      - ./repos/almalinux8:/repos/almalinux8:rw
+      - ./repos/rocky8:/repos/rocky8:rw
+      - ./repos/centos-stream9:/repos/centos-stream9:rw
+      - ./repos/oraclelinux8:/repos/oraclelinux8:rw
+      - ./repos/fedora:/repos/fedora:rw
+      - ./repos/opensuse-leap-15.5:/repos/opensuse-leap-15.5:rw
+      - ./repos/opensuse-leap-15.6:/repos/opensuse-leap-15.6:rw
+      - ./repos/opensuse-leap:/repos/opensuse-leap:rw
+      - ./repos/opensuse-tumbleweed:/repos/opensuse-tumbleweed:rw
+      - ./backend/ssh:/home/appuser/.ssh
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2.5g
+          cpus: "1.5"
+    networks:
+      - vagrant_network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000}
+        REACT_APP_REPO_URL: ${REACT_APP_REPO_URL:-http://localhost:80}
+    container_name: frontend-ui
+    depends_on:
+      - backend
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${FRONTEND_PORT:-3003}:80"
+    restart: unless-stopped
+    networks:
+      - vagrant_network
