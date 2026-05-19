@@ -19,17 +19,29 @@ const API_URL = getApiBaseUrl();
 // ─── Sources connues (label lisible) ─────────────────────────────────────────
 
 const SOURCE_META = {
-  "almalinux8":              { label: "AlmaLinux 8 — base",               security: false },
-  "almalinux8-security":     { label: "AlmaLinux 8 — Security",           security: true  },
-  "rocky8":                  { label: "Rocky Linux 8 — base",             security: false },
-  "rocky8-security":         { label: "Rocky Linux 8 — Security",         security: true  },
-  "centos-stream9":          { label: "CentOS Stream 9 — base",           security: false },
-  "oraclelinux8":            { label: "Oracle Linux 8 — base",            security: false },
-  "fedora":                  { label: "Fedora — base",                    security: false },
-  "opensuse-leap-15.5":      { label: "openSUSE Leap 15.5 — base",        security: false },
-  "opensuse-leap-15.6":      { label: "openSUSE Leap 15.6 — base",        security: false },
-  "opensuse-tumbleweed":     { label: "openSUSE Tumbleweed — base",       security: false },
-  "opensuse-tumbleweed-security": { label: "openSUSE Tumbleweed Security",security: true  },
+  // ── Sources standard (index de paquets) ──────────────────────────────────
+  "almalinux8-baseos":          { label: "AlmaLinux 8 — BaseOS",           security: false },
+  "almalinux8-appstream":       { label: "AlmaLinux 8 — AppStream",        security: false },
+  "almalinux8-extras":          { label: "AlmaLinux 8 — Extras",           security: false },
+  "almalinux9-baseos":          { label: "AlmaLinux 9 — BaseOS",           security: false },
+  "almalinux9-appstream":       { label: "AlmaLinux 9 — AppStream",        security: false },
+  "rocky8-baseos":              { label: "Rocky Linux 8 — BaseOS",         security: false },
+  "rocky8-appstream":           { label: "Rocky Linux 8 — AppStream",      security: false },
+  "rocky9-baseos":              { label: "Rocky Linux 9 — BaseOS",         security: false },
+  "rocky9-appstream":           { label: "Rocky Linux 9 — AppStream",      security: false },
+  "centos-stream9-baseos":      { label: "CentOS Stream 9 — BaseOS",       security: false },
+  "centos-stream9-appstream":   { label: "CentOS Stream 9 — AppStream",    security: false },
+  "oraclelinux8-baseos":        { label: "Oracle Linux 8 — BaseOS",        security: false },
+  "oraclelinux8-appstream":     { label: "Oracle Linux 8 — AppStream",     security: false },
+  "oraclelinux9-baseos":        { label: "Oracle Linux 9 — BaseOS",        security: false },
+  "fedora42":                   { label: "Fedora 42 — Everything",         security: false },
+  "epel8":                      { label: "EPEL 8 — Extra Packages",        security: false },
+  "epel9":                      { label: "EPEL 9 — Extra Packages",        security: false },
+  "opensuse-leap-15.6-oss":     { label: "openSUSE Leap 15.6 — OSS",       security: false },
+  "opensuse-tumbleweed-oss":    { label: "openSUSE Tumbleweed — OSS",       security: false },
+  // ── Sources sécurité (avis CVE / mises à jour) ───────────────────────────
+  "fedora42-updates":           { label: "Fedora 42 — Updates",            security: true  },
+  "opensuse-leap-15.6-updates": { label: "openSUSE Leap 15.6 — Updates",   security: true  },
 };
 
 // ─── Composants utilitaires ───────────────────────────────────────────────────

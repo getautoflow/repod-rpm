@@ -13,6 +13,7 @@ REPO_BASE = Path(os.getenv("REPO_BASE", "/repos"))
 GNUPG_HOME = os.getenv("GNUPG_HOME", "/repos/gnupg")
 
 RPM_DISTRIBUTIONS = [
+    # ── Famille RHEL 8 ────────────────────────────────────────────────────────
     {
         "codename": "almalinux8",
         "name": "AlmaLinux 8",
@@ -25,6 +26,17 @@ RPM_DISTRIBUTIONS = [
         "grype_distro": "almalinux:8",
     },
     {
+        "codename": "almalinux9",
+        "name": "AlmaLinux 9",
+        "full_name": "AlmaLinux 9 — Midnight Oncilla",
+        "os": "almalinux",
+        "version": "9",
+        "badge": "RHEL-compat",
+        "color": "blue",
+        "package_manager": "dnf",
+        "grype_distro": "almalinux:9",
+    },
+    {
         "codename": "rocky8",
         "name": "Rocky Linux 8",
         "full_name": "Rocky Linux 8 — Green Obsidian",
@@ -34,6 +46,17 @@ RPM_DISTRIBUTIONS = [
         "color": "green",
         "package_manager": "dnf",
         "grype_distro": "rockylinux:8",
+    },
+    {
+        "codename": "rocky9",
+        "name": "Rocky Linux 9",
+        "full_name": "Rocky Linux 9 — Blue Onyx",
+        "os": "rocky",
+        "version": "9",
+        "badge": "RHEL-compat",
+        "color": "green",
+        "package_manager": "dnf",
+        "grype_distro": "rockylinux:9",
     },
     {
         "codename": "centos-stream9",
@@ -57,49 +80,29 @@ RPM_DISTRIBUTIONS = [
         "package_manager": "dnf",
         "grype_distro": "oraclelinux:8",
     },
+    # ── Fedora ────────────────────────────────────────────────────────────────
     {
         "codename": "fedora",
         "name": "Fedora",
-        "full_name": "Fedora (dernière version stable)",
+        "full_name": "Fedora 42",
         "os": "fedora",
-        "version": "latest",
-        "badge": "Rolling",
+        "version": "42",
+        "badge": "Upstream",
         "color": "blue",
         "package_manager": "dnf",
-        "grype_distro": "fedora:latest",
+        "grype_distro": "fedora:42",
     },
-    {
-        "codename": "opensuse-leap-15.5",
-        "name": "openSUSE Leap 15.5",
-        "full_name": "openSUSE Leap 15.5",
-        "os": "opensuse",
-        "version": "15.5",
-        "badge": "SUSE-compat",
-        "color": "teal",
-        "package_manager": "zypper",
-        "grype_distro": "opensuse/leap:15.5",
-    },
+    # ── openSUSE ──────────────────────────────────────────────────────────────
     {
         "codename": "opensuse-leap-15.6",
         "name": "openSUSE Leap 15.6",
         "full_name": "openSUSE Leap 15.6",
         "os": "opensuse",
         "version": "15.6",
-        "badge": "SUSE-compat",
-        "color": "teal",
-        "package_manager": "zypper",
-        "grype_distro": "opensuse/leap:15.6",
-    },
-    {
-        "codename": "opensuse-leap",
-        "name": "openSUSE Leap",
-        "full_name": "openSUSE Leap (dernière version stable)",
-        "os": "opensuse",
-        "version": "leap",
         "badge": "SUSE-stable",
         "color": "teal",
         "package_manager": "zypper",
-        "grype_distro": "opensuse/leap:latest",
+        "grype_distro": "opensuse/leap:15.6",
     },
     {
         "codename": "opensuse-tumbleweed",
@@ -118,20 +121,35 @@ VALID_CODENAMES = {d["codename"] for d in RPM_DISTRIBUTIONS}
 
 ARCHITECTURES = ["x86_64", "aarch64", "noarch", "i686"]
 
-# Mapping source RPM → distribution interne
+# Mapping source_id (package_index.py) → codename distribution interne
 SOURCE_TO_DISTRIB: dict[str, str] = {
-    "almalinux8-baseos": "almalinux8",
-    "almalinux8-appstream": "almalinux8",
-    "rocky8-baseos": "rocky8",
-    "rocky8-appstream": "rocky8",
-    "centos-stream9-baseos": "centos-stream9",
-    "centos-stream9-appstream": "centos-stream9",
-    "oraclelinux8-baseos": "oraclelinux8",
-    "fedora-stable": "fedora",
-    "fedora-updates": "fedora",
-    "opensuse-leap-15.5": "opensuse-leap-15.5",
-    "opensuse-leap-15.6": "opensuse-leap-15.6",
-    "opensuse-tumbleweed": "opensuse-tumbleweed",
+    # AlmaLinux
+    "almalinux8-baseos":          "almalinux8",
+    "almalinux8-appstream":       "almalinux8",
+    "almalinux8-extras":          "almalinux8",
+    "almalinux9-baseos":          "almalinux9",
+    "almalinux9-appstream":       "almalinux9",
+    # Rocky Linux
+    "rocky8-baseos":              "rocky8",
+    "rocky8-appstream":           "rocky8",
+    "rocky9-baseos":              "rocky9",
+    "rocky9-appstream":           "rocky9",
+    # CentOS Stream
+    "centos-stream9-baseos":      "centos-stream9",
+    "centos-stream9-appstream":   "centos-stream9",
+    # Oracle Linux
+    "oraclelinux8-baseos":        "oraclelinux8",
+    "oraclelinux8-appstream":     "oraclelinux8",
+    "oraclelinux9-baseos":        "oraclelinux8",   # pas de distro oraclelinux9 encore
+    # Fedora + EPEL
+    "fedora42":                   "fedora",
+    "fedora42-updates":           "fedora",
+    "epel8":                      "almalinux8",
+    "epel9":                      "rocky9",
+    # openSUSE
+    "opensuse-leap-15.6-oss":     "opensuse-leap-15.6",
+    "opensuse-leap-15.6-updates": "opensuse-leap-15.6",
+    "opensuse-tumbleweed-oss":    "opensuse-tumbleweed",
 }
 
 
@@ -207,12 +225,27 @@ def add_rpm_to_distrib(rpm_filename: str, codename: str) -> tuple[bool, str]:
     return True, f"{rpm_filename} ajouté dans {codename}/{arch}"
 
 
+def _open_compressed(path: Path) -> bytes:
+    """Ouvre un fichier compressé .gz, .zst ou non-compressé et retourne les bytes."""
+    suffix = path.suffix.lower()
+    if suffix == ".gz":
+        import gzip
+        with gzip.open(str(path), "rb") as f:
+            return f.read()
+    elif suffix == ".zst":
+        import zstandard
+        dctx = zstandard.ZstdDecompressor()
+        with open(str(path), "rb") as f:
+            return dctx.decompress(f.read(), max_output_size=256 * 1024 * 1024)
+    else:
+        return path.read_bytes()
+
+
 def list_packages_in_distrib(codename: str, arch: str = "x86_64") -> list[dict]:
     """
-    Liste les paquets dans une distribution en parsant primary.xml.gz de createrepo_c.
+    Liste les paquets dans une distribution en parsant primary.xml de createrepo_c.
+    Supporte les compressions .gz et .zst (format moderne de createrepo_c).
     """
-    import gzip
-
     distrib_path = _distrib_dir(codename, arch)
     repomd = distrib_path / "repodata" / "repomd.xml"
 
@@ -239,8 +272,7 @@ def list_packages_in_distrib(codename: str, arch: str = "x86_64") -> list[dict]:
         if not primary_path.exists():
             return []
 
-        with gzip.open(str(primary_path), "rb") as f:
-            primary_xml = f.read()
+        primary_xml = _open_compressed(primary_path)
 
         pkg_tree = ET.fromstring(primary_xml)
         pkg_ns = {"p": "http://linux.duke.edu/metadata/common"}

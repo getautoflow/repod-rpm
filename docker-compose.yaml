@@ -13,16 +13,16 @@ services:
     volumes:
       - ./.gnupg:/root/.gnupg:rw
       - ./repos/gnupg:/repos/gnupg:rw
-      # Distributions RPM
-      - ./repos/almalinux8:/usr/share/nginx/html/repos/almalinux8
-      - ./repos/rocky8:/usr/share/nginx/html/repos/rocky8
-      - ./repos/centos-stream9:/usr/share/nginx/html/repos/centos-stream9
-      - ./repos/oraclelinux8:/usr/share/nginx/html/repos/oraclelinux8
-      - ./repos/fedora:/usr/share/nginx/html/repos/fedora
-      - ./repos/opensuse-leap-15.5:/usr/share/nginx/html/repos/opensuse-leap-15.5
-      - ./repos/opensuse-leap-15.6:/usr/share/nginx/html/repos/opensuse-leap-15.6
-      - ./repos/opensuse-leap:/usr/share/nginx/html/repos/opensuse-leap
-      - ./repos/opensuse-tumbleweed:/usr/share/nginx/html/repos/opensuse-tumbleweed
+      # Distributions RPM — stockées sur volumes logiques dédiés
+      - /repo/almalinux8:/usr/share/nginx/html/repos/almalinux8
+      - /repo/almalinux9:/usr/share/nginx/html/repos/almalinux9
+      - /repo/rocky8:/usr/share/nginx/html/repos/rocky8
+      - /repo/rocky9:/usr/share/nginx/html/repos/rocky9
+      - /repo/centos-stream9:/usr/share/nginx/html/repos/centos-stream9
+      - /repo/oraclelinux8:/usr/share/nginx/html/repos/oraclelinux8
+      - /repo/fedora:/usr/share/nginx/html/repos/fedora
+      - /repo/opensuse-leap:/usr/share/nginx/html/repos/opensuse-leap-15.6
+      - /repo/opensuse-tumbleweed:/usr/share/nginx/html/repos/opensuse-tumbleweed
       - ./nginx/repo.conf:/etc/nginx/conf.d/repo.conf:ro
       - ./scripts/add-rpm.sh:/scripts/add-rpm.sh
       - ./repos/logs:/var/log/nginx
@@ -50,7 +50,7 @@ services:
       CLAMAV_DB_DIR: /var/lib/clamav
       AUTH_DB_PATH: /repos/auth/users.db
       SETTINGS_PATH: /repos/settings.json
-      GRYPE_DB_CACHE_DIR: /repos/grype-db
+      GRYPE_DB_CACHE_DIR: /repos/fedora/.grype-db
       SECURITY_DIR: /repos/security
       NGINX_LOGS_DIR: /repos/logs
       GNUPG_HOME: /repos/gnupg
@@ -65,22 +65,22 @@ services:
       - ./repos/package-index:/repos/package-index
       - ./repos/imports:/repos/imports
       - ./repos/clamav-db:/var/lib/clamav
-      - ./repos/grype-db:/repos/grype-db
+      - /repo/fedora/.grype-db:/repos/fedora/.grype-db
       - ./repos/auth:/repos/auth
       - ./repos/settings.json:/repos/settings.json
       - ./repos/security:/repos/security
       - ./repos/logs:/repos/logs
       - ./repos/gnupg:/repos/gnupg:rw
-      # Distributions RPM (partagées avec rpm-repo)
-      - ./repos/almalinux8:/repos/almalinux8:rw
-      - ./repos/rocky8:/repos/rocky8:rw
-      - ./repos/centos-stream9:/repos/centos-stream9:rw
-      - ./repos/oraclelinux8:/repos/oraclelinux8:rw
-      - ./repos/fedora:/repos/fedora:rw
-      - ./repos/opensuse-leap-15.5:/repos/opensuse-leap-15.5:rw
-      - ./repos/opensuse-leap-15.6:/repos/opensuse-leap-15.6:rw
-      - ./repos/opensuse-leap:/repos/opensuse-leap:rw
-      - ./repos/opensuse-tumbleweed:/repos/opensuse-tumbleweed:rw
+      # Distributions RPM — volumes logiques dédiés (partagés avec rpm-repo)
+      - /repo/almalinux8:/repos/almalinux8:rw
+      - /repo/almalinux9:/repos/almalinux9:rw
+      - /repo/rocky8:/repos/rocky8:rw
+      - /repo/rocky9:/repos/rocky9:rw
+      - /repo/centos-stream9:/repos/centos-stream9:rw
+      - /repo/oraclelinux8:/repos/oraclelinux8:rw
+      - /repo/fedora:/repos/fedora:rw
+      - /repo/opensuse-leap:/repos/opensuse-leap-15.6:rw
+      - /repo/opensuse-tumbleweed:/repos/opensuse-tumbleweed:rw
       - ./backend/ssh:/home/appuser/.ssh
     ports:
       - "${BIND_HOST:-0.0.0.0}:${BACKEND_PORT:-8000}:8000"

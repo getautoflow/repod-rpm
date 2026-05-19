@@ -1,0 +1,174 @@
+# =============================================================================
+# docker-compose.prod.yml — Stack de production RPM Repo Manager
+# =============================================================================
+#
+# Prérequis :
+#   1. Avoir exécuté scripts/setup-storage.sh pour initialiser les LVM
+#   2. Avoir renseigné .env et backend.env (cp *.example)
+#   3. Images buildées : docker compose -f docker-compose.prod.yml build
+#
+# Démarrage :
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# =============================================================================
+
+networks:
+  # Réseau interne — jamais exposé à l'extérieur
+  internal:
+    driver: bridge
+    internal: true
+  # Réseau externe — uniquement pour les ports publiés
+  external:
+    driver: bridge
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+    compress: "true"
+
+x-restart: &always-restart
+  restart: always
+
+# =============================================================================
+# SERVICES
+# =============================================================================
+
+services:
+
+  # ── Dépôt RPM (Nginx) ──────────────────────────────────────────────────────
+  rpm-repo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rpm-repo:${APP_VERSION:-latest}
+    container_name: depot-rpm
+    <<: *always-restart
+    logging: *default-logging
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${RPM_PORT:-80}:80"
+    volumes:
+      - ./.gnupg:/root/.gnupg:rw
+      - /repo/data/gnupg:/repos/gnupg:rw
+      # ── Distributions RPM — volumes logiques dédiés ──────────────────────
+      - /repo/almalinux8:/usr/share/nginx/html/repos/almalinux8:ro
+      - /repo/almalinux9:/usr/share/nginx/html/repos/almalinux9:ro
+      - /repo/rocky8:/usr/share/nginx/html/repos/rocky8:ro
+      - /repo/rocky9:/usr/share/nginx/html/repos/rocky9:ro
+      - /repo/centos-stream9:/usr/share/nginx/html/repos/centos-stream9:ro
+      - /repo/oraclelinux8:/usr/share/nginx/html/repos/oraclelinux8:ro
+      - /repo/fedora:/usr/share/nginx/html/repos/fedora:ro
+      - /repo/opensuse-leap:/usr/share/nginx/html/repos/opensuse-leap-15.6:ro
+      - /repo/opensuse-tumbleweed:/usr/share/nginx/html/repos/opensuse-tumbleweed:ro
+      # ── Config et logs ───────────────────────────────────────────────────
+      - ./nginx/repo.conf:/etc/nginx/conf.d/repo.conf:ro
+      - ./scripts/add-rpm.sh:/scripts/add-rpm.sh:ro
+      - /repo/logs:/var/log/nginx
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+      - external
+
+  # ── Backend FastAPI ─────────────────────────────────────────────────────────
+  backend:
+    build: ./backend
+    image: rpm-repo-backend:${APP_VERSION:-latest}
+    container_name: backend-api
+    depends_on:
+      rpm-repo:
+        condition: service_healthy
+    <<: *always-restart
+    logging: *default-logging
+    env_file: backend.env
+    environment:
+      ENV: production
+      # ── Chemins internes (correspondent aux volumes ci-dessous) ──────────
+      POOL_DIR:            /repos/pool
+      MANIFEST_DIR:        /repos/data/manifests
+      STAGING_INCOMING:    /repos/data/staging/incoming
+      STAGING_QUARANTINE:  /repos/data/staging/quarantine
+      AUDIT_DIR:           /repos/data/audit
+      INDEX_PATH:          /repos/data/manifests/index.json
+      ADD_RPM_SCRIPT:      /scripts/add-rpm.sh
+      INDEX_DIR:           /repos/data/package-index
+      IMPORTS_DIR:         /repos/data/imports
+      CLAMAV_DB_DIR:       /repos/clamav-db
+      AUTH_DB_PATH:        /repos/data/auth/users.db
+      SETTINGS_PATH:       /repos/data/settings.json
+      GRYPE_DB_CACHE_DIR:  /repos/grype-db
+      SECURITY_DIR:        /repos/data/security
+      NGINX_LOGS_DIR:      /repos/logs
+      GNUPG_HOME:          /repos/data/gnupg
+      REPO_BASE:           /repos
+      TRUSTED_PROXIES:     "127.0.0.1,172.16.0.0/12,192.168.0.0/16,10.0.0.0/8"
+    volumes:
+      - ./scripts:/scripts:ro
+      # ── Volumes logiques dédiés ──────────────────────────────────────────
+      - /repo/pool:/repos/pool:rw
+      - /repo/data:/repos/data:rw
+      - /repo/grype-db:/repos/grype-db:rw
+      - /repo/clamav-db:/repos/clamav-db:rw
+      - /repo/logs:/repos/logs:rw
+      # ── Distributions RPM (lecture + écriture pour le backend) ───────────
+      - /repo/almalinux8:/repos/almalinux8:rw
+      - /repo/almalinux9:/repos/almalinux9:rw
+      - /repo/rocky8:/repos/rocky8:rw
+      - /repo/rocky9:/repos/rocky9:rw
+      - /repo/centos-stream9:/repos/centos-stream9:rw
+      - /repo/oraclelinux8:/repos/oraclelinux8:rw
+      - /repo/fedora:/repos/fedora:rw
+      - /repo/opensuse-leap:/repos/opensuse-leap-15.6:rw
+      - /repo/opensuse-tumbleweed:/repos/opensuse-tumbleweed:rw
+      # ── Clés SSH (imports distants) ───────────────────────────────────────
+      - ./backend/ssh:/home/appuser/.ssh:ro
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+          cpus: "2.0"
+        reservations:
+          memory: 512m
+          cpus: "0.5"
+    networks:
+      - internal
+      - external
+
+  # ── Frontend React (Nginx) ──────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_API_URL:  ${REACT_APP_API_URL:?Définir REACT_APP_API_URL dans .env}
+        REACT_APP_REPO_URL: ${REACT_APP_REPO_URL:?Définir REACT_APP_REPO_URL dans .env}
+    image: rpm-repo-frontend:${APP_VERSION:-latest}
+    container_name: frontend-ui
+    depends_on:
+      backend:
+        condition: service_healthy
+    <<: *always-restart
+    logging: *default-logging
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${FRONTEND_PORT:-3003}:80"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+      - external

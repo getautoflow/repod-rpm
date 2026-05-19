@@ -30,18 +30,34 @@ DEFAULT_SETTINGS: dict = {
         "minute": 0,
     },
     "sources": {
-            "almalinux8-baseos": True,
-            "almalinux8-appstream": True,
-            "rocky8-baseos": True,
-            "rocky8-appstream": True,
-            "centos-stream9-baseos": True,
-            "centos-stream9-appstream": True,
-            "oraclelinux8-baseos": True,
-            "fedora-stable": True,
-            "opensuse-leap-15.6": True,
-            "opensuse-tumbleweed": True,
-            "almalinux8-security": True,
-            "rocky8-security": True,
+        # ── AlmaLinux ──────────────────────────────────────────────────────────
+        "almalinux8-baseos":          True,
+        "almalinux8-appstream":       True,
+        "almalinux8-extras":          True,
+        "almalinux9-baseos":          True,
+        "almalinux9-appstream":       True,
+        # ── Rocky Linux ────────────────────────────────────────────────────────
+        "rocky8-baseos":              True,
+        "rocky8-appstream":           True,
+        "rocky9-baseos":              True,
+        "rocky9-appstream":           True,
+        # ── CentOS Stream ──────────────────────────────────────────────────────
+        "centos-stream9-baseos":      True,
+        "centos-stream9-appstream":   True,
+        # ── Oracle Linux ───────────────────────────────────────────────────────
+        "oraclelinux8-baseos":        True,
+        "oraclelinux8-appstream":     True,
+        "oraclelinux9-baseos":        True,
+        # ── Fedora ─────────────────────────────────────────────────────────────
+        "fedora42":                   True,
+        "fedora42-updates":           True,
+        # ── EPEL (désactivé par défaut — volumineuse) ──────────────────────────
+        "epel8":                      False,
+        "epel9":                      False,
+        # ── openSUSE ───────────────────────────────────────────────────────────
+        "opensuse-leap-15.6-oss":     True,
+        "opensuse-leap-15.6-updates": True,
+        "opensuse-tumbleweed-oss":    True,
     },
     "notifications": {
         "webhook_url": "",
