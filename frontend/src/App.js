@@ -4,9 +4,11 @@ import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import OidcCallbackPage from "./pages/OidcCallbackPage";
 import HealthPage from "./pages/HealthPage";
 import DownloadStatsPage from "./pages/DownloadStatsPage";
 import SbomPage from "./pages/SbomPage";
+import SsoPage from "./pages/SsoPage";
 import DashboardLayout from "./layouts/DashboardLayout";
 import PackageList from "./components/PackageList";
 import UploadForm from "./components/UploadForm";
@@ -28,6 +30,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/oidc-callback" element={<OidcCallbackPage />} />
           <Route path="/security/report" element={
             <ProtectedRoute><SecurityReportPage /></ProtectedRoute>
           } />
@@ -52,6 +55,7 @@ export default function App() {
             <Route path="health"    element={<HealthPage />} />
             <Route path="downloads" element={<DownloadStatsPage />} />
             <Route path="sbom"      element={<SbomPage />} />
+            <Route path="sso"       element={<SsoPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

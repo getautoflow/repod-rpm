@@ -26,6 +26,9 @@ from services.security_decisions import (
     get_sla_status, is_decision_expired, ACTION_TO_STATUS,
 )
 from services.notifications import notify_decision
+from services.email_notifications import notify_decision_email
+from services.pagination import paginate
+from services.health_checks import get_clamav_status
 
 router = APIRouter(prefix="/security", tags=["Security"])
 
@@ -36,75 +39,14 @@ MANIFEST_DIR = Path(os.getenv("MANIFEST_DIR", "/repos/manifests"))
 CLAMAV_DB_DIR = Path(os.getenv("CLAMAV_DB_DIR", "/var/lib/clamav"))
 
 
-def _get_clamav_status() -> dict:
-    """Retourne le statut actuel de ClamAV et sa base de signatures."""
-    status = {
-        "available": False,
-        "version": None,
-        "db_version": None,
-        "db_date": None,
-        "db_files": [],
-        "daemon_running": False,
-    }
-
-    # Version de clamscan
-    try:
-        r = subprocess.run(["clamscan", "--version"], capture_output=True, text=True, timeout=5)
-        if r.returncode == 0:
-            status["available"] = True
-            # Ex: "ClamAV 1.4.3/27969/Sun Apr 12 06:24:30 2026"
-            parts = r.stdout.strip().split("/")
-            if len(parts) >= 3:
-                status["version"] = parts[0].replace("ClamAV ", "").strip()
-                status["db_version"] = parts[1].strip()
-                status["db_date"] = parts[2].strip()
-    except Exception:
-        pass
-
-    # Fichiers de la DB sur le volume
-    if CLAMAV_DB_DIR.exists():
-        db_files = []
-        for f in sorted(CLAMAV_DB_DIR.glob("*.cv*")):
-            stat = f.stat()
-            db_files.append({
-                "name": f.name,
-                "size_bytes": stat.st_size,
-                "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-            })
-        status["db_files"] = db_files
-
-    # Vérifier si freshclam daemon tourne
-    try:
-        r = subprocess.run(["pgrep", "-x", "freshclam"], capture_output=True, text=True, timeout=3)
-        status["daemon_running"] = r.returncode == 0
-    except Exception:
-        pass
-
-    # Lire le cooldown depuis freshclam.dat
-    cooldown_until = None
-    freshclam_dat = CLAMAV_DB_DIR / "freshclam.dat"
-    if freshclam_dat.exists():
-        try:
-            content = freshclam_dat.read_text()
-            # Le fichier contient une ligne avec le timestamp de fin de cooldown
-            for line in content.splitlines():
-                if "cool" in line.lower() or line.strip().isdigit():
-                    ts = int(line.strip())
-                    if ts > 0:
-                        cooldown_until = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
-                        break
-        except Exception:
-            pass
-    status["cooldown_until"] = cooldown_until
-
-    return status
-
 
 @router.get("/vulnerabilities")
 def get_vulnerabilities(
     severity: str = Query(None, description="Filtrer par sévérité: critical, high, medium, low"),
     fix_state: str = Query(None, description="Filtrer par état du fix: fixed, not-fixed, unknown"),
-    distribution: str = Query(None, description="Filtrer par distribution APT"),
+    distribution: str = Query(None, description="Filtrer par distribution RPM"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     current_user: str = Depends(get_current_user),
 ):
     """
@@ -195,12 +137,12 @@ def get_vulnerabilities(
         sev = v["severity"].lower()
         summary[sev] = summary.get(sev, 0) + 1
 
+    paginated = paginate(vulns, page=page, per_page=per_page)
     return {
         "summary": summary,
-        "total": len(vulns),
         "packages_scanned": len(packages_scanned),
-        "vulnerabilities": vulns,
         "packages": packages_scanned,
+        **paginated,   # items, total, page, per_page, pages
     }
 
 
@@ -404,6 +346,8 @@ def get_package_cve(
 
 @router.get("/review-queue")
 def get_review_queue(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
     current_user: str = Depends(get_current_user),
 ):
     """
@@ -468,11 +412,11 @@ def get_review_queue(
         p["imported_at"] or "",
     ))
 
+    paginated = paginate(queue, page=page, per_page=per_page)
     return {
-        "total":           len(queue),
-        "blocked_count":   sum(1 for p in queue if p["status"] == "blocked"),
-        "review_count":    sum(1 for p in queue if p["status"] == "pending_review"),
-        "packages":        queue,
+        "blocked_count": sum(1 for p in queue if p["status"] == "blocked"),
+        "review_count":  sum(1 for p in queue if p["status"] == "pending_review"),
+        **paginated,     # items, total, page, per_page, pages
     }
 
 
@@ -921,7 +865,7 @@ def quarantine_package(
 @router.get("/clamav/status")
 def clamav_status(current_user: str = Depends(get_current_user)):
     """Retourne le statut de ClamAV et de sa base de signatures."""
-    return _get_clamav_status()
+    return get_clamav_status()
 
 
 @router.post("/clamav/update")
@@ -971,7 +915,7 @@ def clamav_update(current_user: str = Depends(get_admin_user)):
             process.wait()
 
             if process.returncode == 0:
-                status = _get_clamav_status()
+                status = get_clamav_status()
                 yield emit(
                     f"Mise à jour terminée — DB version {status.get('db_version', '?')} "
                     f"({status.get('db_date', '?')})",

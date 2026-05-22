@@ -1,5 +1,41 @@
 import { useState, useEffect, useCallback } from "react";
-import { getHealth } from "../api";
+import { getHealth, getBaseUrl } from "../api";
+
+const BASE_URL = getBaseUrl();
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  const handle = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <button
+      onClick={handle}
+      className="ml-auto px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200
+                 hover:bg-gray-100 text-gray-600 transition-colors flex items-center gap-1.5"
+    >
+      {copied ? (
+        <>
+          <svg className="w-3 h-3 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          Copié !
+        </>
+      ) : (
+        <>
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+          Copier
+        </>
+      )}
+    </button>
+  );
+}
 
 function StatusBadge({ status }) {
   const cfg = {
@@ -154,6 +190,67 @@ export default function HealthPage() {
               <span className="ml-2 text-blue-800">{fmtDate(data.timestamp)}</span>
             </div>
           </div>
+
+          {/* ─── Section Prometheus ─────────────────────────────── */}
+          {(() => {
+            const metricsUrl = `${BASE_URL}/metrics`;
+            const scrapeYaml = `- job_name: 'repod'\n  scrape_interval: 30s\n  static_configs:\n    - targets: ['${(BASE_URL || "localhost:8000").replace(/^https?:\/\//, "")}']  # host:port\n  metrics_path: /metrics`;
+            return (
+              <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-orange-500 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 110-16 8 8 0 010 16zm-1-5h2v2h-2v-2zm0-8h2v6h-2V7z"/>
+                  </svg>
+                  <h2 className="text-sm font-semibold text-gray-800">Métriques Prometheus</h2>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Endpoint <span className="font-mono">/metrics</span> disponible pour le scraping.
+                  Expose les compteurs HTTP, latences, paquets et vulnérabilités.
+                </p>
+
+                {/* Lien endpoint */}
+                <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                  <span className="text-xs font-mono font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded">GET</span>
+                  <span className="text-xs font-mono text-gray-700 flex-1">{metricsUrl}</span>
+                  <a
+                    href={metricsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline whitespace-nowrap"
+                  >
+                    Ouvrir ↗
+                  </a>
+                </div>
+
+                {/* Métriques exposées */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {[
+                    ["repod_http_requests_total",            "Requêtes HTTP (method, path, status)"],
+                    ["repod_http_request_duration_seconds",  "Latence des requêtes (histogramme)"],
+                    ["repod_packages_total",                 "Paquets par distribution et arch"],
+                    ["repod_vulnerabilities_total",          "CVE par sévérité"],
+                    ["repod_uploads_total",                  "Uploads de paquets (succès/échec)"],
+                  ].map(([name, desc]) => (
+                    <div key={name} className="bg-gray-50 rounded-lg px-3 py-2">
+                      <p className="font-mono text-gray-800 text-xs leading-tight">{name}</p>
+                      <p className="text-gray-400 mt-0.5">{desc}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Config scrape */}
+                <div>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <p className="text-xs font-medium text-gray-700">Configuration <span className="font-mono">prometheus.yml</span></p>
+                    <CopyButton text={scrapeYaml} />
+                  </div>
+                  <pre className="bg-gray-900 text-green-400 text-xs rounded-lg p-4 overflow-x-auto leading-relaxed">
+{scrapeYaml}
+                  </pre>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Grille des checks */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

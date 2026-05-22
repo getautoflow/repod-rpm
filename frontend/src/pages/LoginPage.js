@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { login, requestPasswordReset } from "../api";
+import { login, requestPasswordReset, mfaAuthenticate, getOidcPublicConfig, oidcAuthorize } from "../api";
 import { useAuth } from "../context/AuthContext";
 
 export default function LoginPage() {
@@ -11,8 +11,19 @@ export default function LoginPage() {
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState("");
   const [showForgot, setShowForgot] = useState(false);
+  const [mfaToken,   setMfaToken]   = useState("");
+  const [totpCode,   setTotpCode]   = useState("");
+  const [oidcConfig, setOidcConfig] = useState(null);
+  const [ssoLoading, setSsoLoading] = useState(false);
   const { signIn } = useAuth();
   const navigate = useNavigate();
+
+  // Charger la config OIDC publique au montage (sans auth)
+  useEffect(() => {
+    getOidcPublicConfig()
+      .then((cfg) => setOidcConfig(cfg))
+      .catch(() => { /* OIDC non configuré — ignorer silencieusement */ });
+  }, []);
 
   // ── Connexion ──────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
@@ -25,8 +36,13 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const { data } = await login(username, password);
-      signIn(data.access_token);
-      navigate("/");
+      if (data.mfa_required && data.mfa_token) {
+        // Étape 1 réussie — le MFA est requis
+        setMfaToken(data.mfa_token);
+      } else {
+        signIn(data.access_token);
+        navigate("/");
+      }
     } catch (err) {
       const status = err?.response?.status;
       if (status === 401) {
@@ -41,6 +57,159 @@ export default function LoginPage() {
     }
   };
 
+  // ── Validation TOTP (étape 2) ──────────────────────────────────────────────
+  const handleMfaSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!totpCode || totpCode.length !== 6) {
+      setError("Entrez le code à 6 chiffres de votre application.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await mfaAuthenticate(mfaToken, totpCode);
+      signIn(data.access_token);
+      navigate("/");
+    } catch (err) {
+      const status = err?.response?.status;
+      if (status === 401) {
+        setError("Code TOTP invalide ou expiré. Réessayez.");
+      } else if (status === 429) {
+        setError("Trop de tentatives. Réessayez dans quelques minutes.");
+      } else {
+        setError("Impossible de contacter le serveur.");
+      }
+      setTotpCode("");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Connexion SSO via PKCE ─────────────────────────────────────────────────
+  const handleSsoLogin = async () => {
+    setSsoLoading(true);
+    setError("");
+    try {
+      // 1. Générer code_verifier : 96 octets aléatoires → base64url (sans padding)
+      const verifierBytes = new Uint8Array(96);
+      crypto.getRandomValues(verifierBytes);
+      const codeVerifier = btoa(String.fromCharCode(...verifierBytes))
+        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+
+      // 2. code_challenge = SHA-256(code_verifier) → base64url
+      const encoded     = new TextEncoder().encode(codeVerifier);
+      const hashBuf     = await crypto.subtle.digest("SHA-256", encoded);
+      const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(hashBuf)))
+        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+
+      // 3. state anti-CSRF : 32 octets aléatoires → hex
+      const stateBytes = new Uint8Array(32);
+      crypto.getRandomValues(stateBytes);
+      const state = Array.from(stateBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+
+      const redirectUri = `${window.location.origin}/oidc-callback`;
+
+      // 4. Persister en sessionStorage pour la page de callback
+      sessionStorage.setItem("oidc_state",         state);
+      sessionStorage.setItem("oidc_code_verifier", codeVerifier);
+      sessionStorage.setItem("oidc_redirect_uri",  redirectUri);
+
+      // 5. Obtenir l'URL d'autorisation de l'IdP et rediriger
+      const { authorization_url } = await oidcAuthorize(codeChallenge, state, redirectUri);
+      window.location.href = authorization_url;
+    } catch {
+      setError("Impossible de démarrer la connexion SSO. Vérifiez la configuration.");
+      setSsoLoading(false);
+    }
+  };
+
+  // ── Écran MFA (étape 2) ─────────────────────────────────────────────────────
+  if (mfaToken) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
+        <div className="w-full max-w-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8">
+            {/* En-tête */}
+            <div className="text-center mb-6">
+              <div className="inline-flex items-center justify-center w-14 h-14 bg-blue-100 rounded-full mb-4">
+                <svg className="w-7 h-7 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <h2 className="text-xl font-bold text-gray-900">Vérification en deux étapes</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Entrez le code à 6 chiffres de votre application authenticator.
+              </p>
+            </div>
+
+            <form onSubmit={handleMfaSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2 text-center">
+                  Code TOTP
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  value={totpCode}
+                  onChange={(e) => {
+                    setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6));
+                    setError("");
+                  }}
+                  className={`w-full border rounded-lg px-4 py-3 text-center text-2xl font-mono
+                    tracking-[0.5em] focus:outline-none focus:ring-2 focus:ring-blue-500
+                    focus:border-transparent
+                    ${error ? "border-red-400 bg-red-50" : "border-gray-300"}`}
+                  placeholder="000000"
+                  autoFocus
+                  autoComplete="one-time-code"
+                />
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+                  <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm-1-9v4a1 1 0 102 0V9a1 1 0 10-2 0zm0-4a1 1 0 112 0 1 1 0 01-2 0z" clipRule="evenodd"/>
+                  </svg>
+                  <p className="text-sm text-red-700">{error}</p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || totpCode.length !== 6}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50
+                           disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg
+                           transition-colors text-sm mt-1"
+              >
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    Vérification…
+                  </span>
+                ) : "Vérifier"}
+              </button>
+            </form>
+
+            <div className="mt-4 text-center">
+              <button
+                onClick={() => { setMfaToken(""); setTotpCode(""); setError(""); }}
+                className="text-sm text-gray-500 hover:text-gray-700 hover:underline"
+              >
+                ← Retour à la connexion
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Écran principal (étape 1) ────────────────────────────────────────────────
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
       <div className="w-full max-w-sm space-y-3">
@@ -148,6 +317,47 @@ export default function LoginPage() {
               Mot de passe oublié ?
             </button>
           </div>
+
+          {/* Bouton SSO — affiché uniquement si OIDC est activé côté serveur */}
+          {oidcConfig?.enabled && (
+            <>
+              <div className="relative my-3">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-200" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="px-3 bg-white text-gray-400 font-medium tracking-wider">ou</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSsoLogin}
+                disabled={ssoLoading}
+                className="w-full flex items-center justify-center gap-2.5 border border-gray-300
+                           rounded-lg px-4 py-2.5 text-sm font-medium text-gray-700
+                           hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50
+                           disabled:cursor-not-allowed transition-colors"
+              >
+                {ssoLoading ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4 text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                    </svg>
+                    Redirection vers {oidcConfig.provider_name}…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24"
+                         stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+                    </svg>
+                    Se connecter avec {oidcConfig.provider_name}
+                  </>
+                )}
+              </button>
+            </>
+          )}
         </div>
 
         {/* Panneau de réinitialisation (accordéon) */}

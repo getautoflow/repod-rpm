@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { getAuditLogs } from "../api";
 import toast from "react-hot-toast";
+import Paginator from "../components/Paginator";
 
 const ACTION_META = {
   UPLOAD:    { label: "Upload",       bg: "#EFF6FF", color: "#2563EB" },
@@ -39,26 +40,33 @@ function Badge({ map, value }) {
 const ACTIONS = ["", "UPLOAD", "VALIDATE", "DELETE", "SYNC", "LOGIN", "DECISION", "QUARANTINE", "SLA_RESET", "IMPORT", "INSTALL"];
 const RESULTS = ["", "SUCCESS", "FAILURE", "WARNING"];
 
+const PER_PAGE = 100;
+
 export default function AuditPage() {
   const [logs, setLogs]           = useState([]);
   const [total, setTotal]         = useState(0);
+  const [page, setPage]           = useState(1);
+  const [pages, setPages]         = useState(1);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState("");
   const [actionFilter, setAction] = useState("");
   const [resultFilter, setResult] = useState("");
   const [packageFilter, setPkg]   = useState("");
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (p = 1) => {
     setLoading(true);
     try {
       const data = await getAuditLogs({
-        limit: 500,
-        package: packageFilter || undefined,
-        action:  actionFilter  || undefined,
-        result:  resultFilter  || undefined,
+        page:     p,
+        per_page: PER_PAGE,
+        package:  packageFilter || undefined,
+        action:   actionFilter  || undefined,
+        result:   resultFilter  || undefined,
       });
-      setLogs(data.logs || []);
-      setTotal(data.total || data.logs?.length || 0);
+      setLogs(data.items || []);
+      setTotal(data.total || 0);
+      setPage(data.page   || 1);
+      setPages(data.pages || 1);
     } catch {
       toast.error("Impossible de charger les logs d'audit");
     } finally {
@@ -66,8 +74,9 @@ export default function AuditPage() {
     }
   }, [packageFilter, actionFilter, resultFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(1); }, [load]);
 
+  // Filtre texte client-side sur la page courante
   const visible = logs.filter(l =>
     !search ||
     l.package?.toLowerCase().includes(search.toLowerCase()) ||
@@ -101,32 +110,32 @@ export default function AuditPage() {
         </div>
 
         {/* Filtre action */}
-        <select value={actionFilter} onChange={e => setAction(e.target.value)}
+        <select value={actionFilter} onChange={e => { setAction(e.target.value); setPage(1); }}
           style={{ padding:"8px 12px", border:"1px solid #E2E8F0", borderRadius:8, fontSize:13, background:"#fff", cursor:"pointer" }}>
           <option value="">Toutes les actions</option>
           {ACTIONS.filter(Boolean).map(a => <option key={a} value={a}>{ACTION_META[a]?.label || a}</option>)}
         </select>
 
         {/* Filtre résultat */}
-        <select value={resultFilter} onChange={e => setResult(e.target.value)}
+        <select value={resultFilter} onChange={e => { setResult(e.target.value); setPage(1); }}
           style={{ padding:"8px 12px", border:"1px solid #E2E8F0", borderRadius:8, fontSize:13, background:"#fff", cursor:"pointer" }}>
           <option value="">Tous les résultats</option>
           {RESULTS.filter(Boolean).map(r => <option key={r} value={r}>{RESULT_META[r]?.label || r}</option>)}
         </select>
 
         {/* Filtre paquet */}
-        <input value={packageFilter} onChange={e => setPkg(e.target.value)}
+        <input value={packageFilter} onChange={e => { setPkg(e.target.value); setPage(1); }}
           placeholder="Paquet spécifique…"
           style={{ padding:"8px 12px", border:"1px solid #E2E8F0", borderRadius:8, fontSize:13, background:"#fff", width:180 }}/>
 
-        <button onClick={load} style={{ padding:"8px 14px", background:"#3B82F6", color:"#fff", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+        <button onClick={() => load(1)} style={{ padding:"8px 14px", background:"#3B82F6", color:"#fff", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer" }}>
           Actualiser
         </button>
       </div>
 
       {/* Compteur */}
       <div style={{ marginBottom: 12, fontSize: 12, color: "#94A3B8" }}>
-        {loading ? "Chargement…" : `${visible.length} entrée${visible.length !== 1 ? "s" : ""} affichée${visible.length !== 1 ? "s" : ""} sur ${total} au total`}
+        {loading ? "Chargement…" : `${visible.length} entrée${visible.length !== 1 ? "s" : ""} affichée${visible.length !== 1 ? "s" : ""} · ${total} au total`}
       </div>
 
       {/* Table */}
@@ -182,6 +191,14 @@ export default function AuditPage() {
             </tbody>
           </table>
         )}
+        <Paginator
+          page={page}
+          pages={pages}
+          total={total}
+          perPage={PER_PAGE}
+          onPageChange={(p) => { setPage(p); load(p); }}
+          loading={loading}
+        />
       </div>
     </div>
   );

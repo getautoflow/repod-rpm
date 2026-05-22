@@ -1,11 +1,15 @@
 import os
+from pathlib import Path
+
+POOL_DIR = Path(os.getenv("POOL_DIR", "/repos/pool"))
+
 
 def list_packages():
     """
-    📌 Retourne la liste des fichiers `.rpm` dans /usr/share/repos/pool.
+    Retourne la liste des fichiers `.rpm` dans POOL_DIR.
+    Le répertoire est configuré via la variable d'environnement POOL_DIR.
     """
-    repo_path = "/usr/share/repos/pool"
-    if not os.path.exists(repo_path):
-        return {"error": "Dossier /usr/share/repos/pool introuvable"}
-    packages = [f for f in os.listdir(repo_path) if f.endswith(".rpm")]
+    if not POOL_DIR.exists():
+        return {"error": f"Dossier {POOL_DIR} introuvable"}
+    packages = [f for f in os.listdir(POOL_DIR) if f.endswith(".rpm")]
     return {"packages": packages}

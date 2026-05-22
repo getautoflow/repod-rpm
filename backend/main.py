@@ -28,10 +28,14 @@ from services.sla_alerts import run_sla_check
 from services.retention import run_retention
 from services.settings import get_settings
 from routers.distributions_router import auto_init_distributions
+from services.logging_config import setup_logging
+from middleware.request_id import RequestIdMiddleware
+from middleware.metrics_middleware import MetricsMiddleware
+from routers.metrics_router import router as metrics_router
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 logger = logging.getLogger("main")
 
 _JWT_SECRET = os.getenv("JWT_SECRET_KEY", "")
@@ -134,15 +138,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(RequestIdMiddleware)
+app.add_middleware(MetricsMiddleware)
+
+API_V1 = "/api/v1"
+
+# health_router et metrics_router restent à la racine (endpoints infra)
 app.include_router(health_router)
-app.include_router(auth_router)
-app.include_router(packages_router)
-app.include_router(upload_router)
-app.include_router(artifacts_router)
-app.include_router(import_router)
-app.include_router(security_router)
-app.include_router(dashboard_router)
-app.include_router(distributions_router)
-app.include_router(settings_router)
-app.include_router(downloads_router)
-app.include_router(sbom_router)
+app.include_router(metrics_router)
+
+# Tous les autres routers sont versionnés sous /api/v1
+app.include_router(auth_router,          prefix=API_V1)
+app.include_router(packages_router,      prefix=API_V1)
+app.include_router(upload_router,        prefix=API_V1)
+app.include_router(artifacts_router,     prefix=API_V1)
+app.include_router(import_router,        prefix=API_V1)
+app.include_router(security_router,      prefix=API_V1)
+app.include_router(dashboard_router,     prefix=API_V1)
+app.include_router(distributions_router, prefix=API_V1)
+app.include_router(settings_router,      prefix=API_V1)
+app.include_router(downloads_router,     prefix=API_V1)
+app.include_router(sbom_router,          prefix=API_V1)
+
+from routers.oidc_router import router as oidc_router
+app.include_router(oidc_router,          prefix=API_V1)
+
+from routers.webhook_router import router as webhook_router
+app.include_router(webhook_router)

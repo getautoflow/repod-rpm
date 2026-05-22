@@ -97,7 +97,9 @@ services:
     build:
       context: ./frontend
       args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000}
+        # Vide = URLs relatives → nginx proxifie /api/ vers le backend (pas de CORS)
+        # Surcharger via .env si accès direct : REACT_APP_API_URL=http://IP:8000
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-}
         REACT_APP_REPO_URL: ${REACT_APP_REPO_URL:-http://localhost:80}
     container_name: frontend-ui
     depends_on:

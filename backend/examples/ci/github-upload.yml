@@ -1,0 +1,85 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GitHub Actions — Upload d'un paquet .rpm vers repod
+# ─────────────────────────────────────────────────────────────────────────────
+# Pré-requis GitHub :
+#   REPOD_URL      → URL de votre instance repod  (ex. https://repo.example.com)
+#   REPOD_USERNAME → Nom d'utilisateur (compte CI dédié, rôle "uploader")
+#   REPOD_PASSWORD → Mot de passe du compte CI
+#
+# Adaptez la section "Build .rpm" à votre système de build (rpmbuild, nfpm…).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Publish RPM to repod
+
+on:
+  push:
+    tags:
+      - 'v*'        # Déclenché à chaque tag de version (v1.2.3)
+  workflow_dispatch:
+    inputs:
+      distribution:
+        description: 'Distribution cible (almalinux8, rocky9, centos-stream9…)'
+        required: true
+        default: 'almalinux8'
+
+env:
+  REPOD_URL: ${{ secrets.REPOD_URL }}
+  DISTRIBUTION: ${{ inputs.distribution || 'almalinux8' }}
+
+jobs:
+  # ── Étape 1 : Obtenir un token JWT repod ───────────────────────────────────
+  authenticate:
+    name: Login repod
+    runs-on: ubuntu-latest
+    outputs:
+      token: ${{ steps.login.outputs.token }}
+    steps:
+      - name: POST /api/v1/auth/token
+        id: login
+        run: |
+          RESPONSE=$(curl -sf -X POST \
+            --data-urlencode "username=${{ secrets.REPOD_USERNAME }}" \
+            --data-urlencode "password=${{ secrets.REPOD_PASSWORD }}" \
+            "$REPOD_URL/api/v1/auth/token")
+          TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::Échec d'authentification repod"
+            exit 1
+          fi
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+  # ── Étape 2 : Build et upload ──────────────────────────────────────────────
+  upload:
+    name: Build & Upload RPM
+    runs-on: ubuntu-latest
+    needs: authenticate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build .rpm package
+        run: |
+          # ← Remplacez par votre commande de build RPM
+          # Exemples :
+          #   rpmbuild -ba mypackage.spec
+          #   nfpm package --packager rpm --target dist/
+          #   fpm -s dir -t rpm ...
+          echo "Adapter cette étape à votre système de build"
+          mkdir -p dist  # placeholder
+
+      - name: Upload RPM to repod
+        run: |
+          TOKEN="${{ needs.authenticate.outputs.token }}"
+          for RPM in dist/*.rpm; do
+            [ -f "$RPM" ] || continue
+            echo "📦 Upload de $RPM vers distribution $DISTRIBUTION..."
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer $TOKEN" \
+              -F "file=@$RPM" \
+              -F "distribution=$DISTRIBUTION" \
+              "$REPOD_URL/api/v1/upload")
+            if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+              echo "::error::Upload échoué pour $RPM (HTTP $HTTP_CODE)"
+              exit 1
+            fi
+            echo "✅ $RPM publié (HTTP $HTTP_CODE)"
+          done

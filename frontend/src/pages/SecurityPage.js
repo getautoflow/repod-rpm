@@ -5,6 +5,7 @@ import {
   getPackagesPosture, getPackageCve, quarantinePackage,
   getReviewQueue, submitDecision, rescanPackage, deleteArtifact,
 } from "../api";
+import Paginator from "../components/Paginator";
 
 const API_URL = getApiBaseUrl();
 
@@ -403,20 +404,25 @@ function DecisionModal({ pkg, onClose, onDecided }) {
 
 // ─── Section Review Queue RSSI ───────────────────────────────────────────────
 
+const RQ_PER_PAGE = 20;
+
 function ReviewQueueSection({ onRefreshPosture }) {
   const [queue, setQueue]       = useState(null);
   const [loading, setLoading]   = useState(true);
   const [deciding, setDeciding] = useState(null);  // pkg en cours de décision
   const [expanded, setExpanded] = useState(null);  // pkg avec CVE dépliées
+  const [page, setPage]         = useState(1);
+  const [pages, setPages]       = useState(1);
   const _sev_order = ["Critical", "High", "Medium", "Low", "Negligible", "Unknown"];
 
-  useEffect(() => { loadQueue(); }, []);
+  useEffect(() => { loadQueue(page); }, [page]); // eslint-disable-line
 
-  const loadQueue = async () => {
+  const loadQueue = async (p = 1) => {
     setLoading(true);
     try {
-      const data = await getReviewQueue();
+      const data = await getReviewQueue(p, RQ_PER_PAGE);
       setQueue(data);
+      setPages(data.pages || 1);
     } catch {
       toast.error("Impossible de charger la file de révision");
     } finally {
@@ -425,7 +431,8 @@ function ReviewQueueSection({ onRefreshPosture }) {
   };
 
   const handleDecided = () => {
-    loadQueue();
+    setPage(1);
+    loadQueue(1);
     onRefreshPosture?.();
   };
 
@@ -485,14 +492,14 @@ function ReviewQueueSection({ onRefreshPosture }) {
               </p>
             </div>
           </div>
-          <button onClick={loadQueue} className="text-xs text-red-400 hover:text-red-600 transition-colors">
+          <button onClick={() => { setPage(1); loadQueue(1); }} className="text-xs text-red-400 hover:text-red-600 transition-colors">
             Actualiser
           </button>
         </div>
 
         {/* Liste */}
         <div className="divide-y divide-gray-100">
-          {queue.packages.map((pkg) => {
+          {(queue.items || []).map((pkg) => {
             const isExpanded = expanded === `${pkg.name}@${pkg.version}`;
             const kev = (pkg.cve_results || []).filter((c) => c.in_kev);
             const epssHigh = (pkg.cve_results || []).filter((c) => (c.epss_percent || 0) >= 10);
@@ -626,6 +633,14 @@ function ReviewQueueSection({ onRefreshPosture }) {
             );
           })}
         </div>
+        <Paginator
+          page={page}
+          pages={pages}
+          total={queue.total || 0}
+          perPage={RQ_PER_PAGE}
+          onPageChange={(p) => { setPage(p); setExpanded(null); }}
+          loading={loading}
+        />
       </div>
     </>
   );
@@ -657,6 +672,8 @@ function DecisionBadge({ action, slaStatus, slaDays }) {
   );
 }
 
+const PKG_PER_PAGE = 25;
+
 // ─── Section posture CVE ─────────────────────────────────────────────────────
 function CvePostureSection({ onDecideRequest }) {
   const [posture, setPosture]   = useState(null);
@@ -664,6 +681,7 @@ function CvePostureSection({ onDecideRequest }) {
   const [selectedPkg, setSelected] = useState(null);
   const [actionLoading, setActL]   = useState(null);
   const [confirmPkg, setConfirm]   = useState(null);  // quarantine confirm
+  const [pkgPage, setPkgPage]      = useState(1);
   // Filtres
   const [sevFilter, setSev]        = useState("all");  // all|critical|high|medium|low|unscanned
   const [kevFilter, setKev]        = useState(false);
@@ -720,7 +738,7 @@ function CvePostureSection({ onDecideRequest }) {
   const distributions = ["all", ...new Set(packages.map(p => p.distribution).filter(Boolean))];
 
   // Filtrage
-  const visible = packages.filter(pkg => {
+  const filtered = packages.filter(pkg => {
     if (distFilter !== "all" && pkg.distribution !== distFilter) return false;
     if (kevFilter && !pkg.kev_count) return false;
     if (sevFilter === "unscanned" && pkg.scanned) return false;
@@ -733,6 +751,11 @@ function CvePostureSection({ onDecideRequest }) {
     if (decisFilter === "expiring" && pkg.sla_status !== "expiring_soon" && pkg.sla_status !== "expired") return false;
     return true;
   });
+
+  // Pagination client-side sur la liste filtrée
+  const pkgPages  = Math.ceil(filtered.length / PKG_PER_PAGE) || 1;
+  const pkgStart  = (pkgPage - 1) * PKG_PER_PAGE;
+  const visible   = filtered.slice(pkgStart, pkgStart + PKG_PER_PAGE);
 
   const hasCritical = (summary.critical || 0) > 0;
   const hasHigh = (summary.high || 0) > 0;
@@ -808,13 +831,13 @@ function CvePostureSection({ onDecideRequest }) {
           <div className="flex items-center gap-2 flex-wrap">
             {/* Distribution */}
             {distributions.length > 2 && (
-              <select value={distFilter} onChange={e => setDist(e.target.value)}
+              <select value={distFilter} onChange={e => { setDist(e.target.value); setPkgPage(1); }}
                 className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600 cursor-pointer">
                 {distributions.map(d => <option key={d} value={d}>{d === "all" ? "Toutes distrib." : d}</option>)}
               </select>
             )}
             {/* Statut décision */}
-            <select value={decisFilter} onChange={e => setDecis(e.target.value)}
+            <select value={decisFilter} onChange={e => { setDecis(e.target.value); setPkgPage(1); }}
               className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600 cursor-pointer">
               <option value="all">Toutes décisions</option>
               <option value="pending">Sans décision</option>
@@ -822,7 +845,7 @@ function CvePostureSection({ onDecideRequest }) {
               <option value="expiring">SLA expirant</option>
             </select>
             {/* Sévérité */}
-            <select value={sevFilter} onChange={e => setSev(e.target.value)}
+            <select value={sevFilter} onChange={e => { setSev(e.target.value); setPkgPage(1); }}
               className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-600 cursor-pointer">
               <option value="all">Toutes sévérités</option>
               <option value="critical">CRITICAL</option>
@@ -840,7 +863,7 @@ function CvePostureSection({ onDecideRequest }) {
             </button>
             {/* Reset filtres */}
             {(sevFilter !== "all" || kevFilter || decisFilter !== "all" || distFilter !== "all") && (
-              <button onClick={() => { setSev("all"); setKev(false); setDecis("all"); setDist("all"); }}
+              <button onClick={() => { setSev("all"); setKev(false); setDecis("all"); setDist("all"); setPkgPage(1); }}
                 className="text-xs text-gray-400 hover:text-gray-600 px-1">
                 <svg className="w-3.5 h-3.5 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Réinitialiser
               </button>
@@ -1057,6 +1080,14 @@ function CvePostureSection({ onDecideRequest }) {
             </table>
           </div>
         )}
+        <Paginator
+          page={pkgPage}
+          pages={pkgPages}
+          total={filtered.length}
+          perPage={PKG_PER_PAGE}
+          onPageChange={(p) => setPkgPage(p)}
+          loading={loading}
+        />
       </div>
     </>
   );

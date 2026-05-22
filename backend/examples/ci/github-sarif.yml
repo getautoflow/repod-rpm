@@ -1,0 +1,76 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GitHub Actions — Export SARIF repod → GitHub Security tab
+# ─────────────────────────────────────────────────────────────────────────────
+# Ce workflow exporte les vulnérabilités de repod au format SARIF 2.1.0 et
+# les uploade dans GitHub Code Scanning pour une visibilité centralisée.
+#
+# Résultat : les CVE repod apparaissent dans
+#   Security → Code scanning alerts → repod-packages
+#
+# Secrets requis : REPOD_URL, REPOD_USERNAME, REPOD_PASSWORD
+# Permission requise : security-events: write (déclarée dans le job)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Export SARIF to GitHub Security
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # Tous les jours à 06h00 UTC
+  workflow_dispatch:        # Déclenchement manuel si besoin
+  push:
+    branches: [main, master]
+
+jobs:
+  sarif-export:
+    name: Export & Upload SARIF
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # Obligatoire pour upload-sarif
+      contents: read
+
+    steps:
+      # ── Authentification repod ──────────────────────────────────────────────
+      - name: Login to repod
+        id: login
+        run: |
+          RESPONSE=$(curl -sf -X POST \
+            --data-urlencode "username=${{ secrets.REPOD_USERNAME }}" \
+            --data-urlencode "password=${{ secrets.REPOD_PASSWORD }}" \
+            "${{ secrets.REPOD_URL }}/api/v1/auth/token")
+          TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::Authentification repod échouée"
+            exit 1
+          fi
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      # ── Export SARIF 2.1.0 depuis repod ────────────────────────────────────
+      - name: Export SARIF from repod
+        run: |
+          curl -sf \
+            -H "Authorization: Bearer ${{ steps.login.outputs.token }}" \
+            "${{ secrets.REPOD_URL }}/api/v1/sbom/sarif" \
+            -o repod.sarif.json
+
+          # Vérification minimale du fichier
+          VERSION=$(jq -r '.version' repod.sarif.json)
+          RESULTS=$(jq '.runs[0].results | length' repod.sarif.json)
+          echo "✅ SARIF $VERSION exporté — $RESULTS résultat(s)"
+          echo "### SARIF repod" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version : $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Résultats : $RESULTS" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Upload vers GitHub Code Scanning ───────────────────────────────────
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: repod.sarif.json
+          category: repod-packages   # Apparaît comme source dans Code Scanning
+
+      # ── Artefact de traçabilité ─────────────────────────────────────────────
+      - name: Save SARIF as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repod-sarif-${{ github.run_id }}
+          path: repod.sarif.json
+          retention-days: 30

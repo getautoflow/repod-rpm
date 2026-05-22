@@ -12,7 +12,7 @@ from services.indexer import list_packages_from_index
 from services.manifest import list_manifests
 from services.audit import get_recent_logs
 from services.security_decisions import list_all_decisions, get_sla_status
-from routers.security_router import _get_clamav_status
+from services.health_checks import get_clamav_status
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -159,7 +159,7 @@ def get_dashboard_stats(current_user: str = Depends(get_current_user)):
 
     # ── ClamAV statut (léger) ─────────────────────────────────────────────────
     try:
-        clamav = _get_clamav_status()
+        clamav = get_clamav_status()
         clamav_summary = {
             "available": clamav["available"],
             "db_version": clamav.get("db_version"),

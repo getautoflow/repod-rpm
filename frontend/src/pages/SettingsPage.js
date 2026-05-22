@@ -301,7 +301,7 @@ function SourcesSection({ settings, onChange }) {
       icon={<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 2 7 12 12 22 7"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>}
       title="Sources RPM"
       description="Activez ou désactivez chaque source. Les sources désactivées sont ignorées lors de la synchronisation et de la recherche."
-      tooltip="Les sources APT sont les dépôts RPM officiels depuis lesquels Repod indexe les paquets disponibles. Les sources marquées 'Sécurité' contiennent les correctifs CVE et sont prioritaires pour les alertes."
+      tooltip="Les sources RPM sont les dépôts officiels depuis lesquels Repod indexe les paquets disponibles. Les sources marquées 'Sécurité' contiennent les correctifs CVE et sont prioritaires pour les alertes."
     >
       <div>
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Sources standard</p>
@@ -784,10 +784,177 @@ export default function SettingsPage() {
       <ValidationSection settings={settings} onChange={handleChange} />
       <CvePolicySection settings={settings} onChange={handleChange} />
       <GpgSection />
+      <CiIntegrationsSection />
 
       {/* Bouton global de sauvegarde */}
       <div className="bg-white rounded-xl border border-gray-200 px-6 py-4">
         <SaveButton onClick={handleSave} saving={saving} dirty={isDirty} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Section Intégrations CI/CD ───────────────────────────────────────────────
+
+function CopySnippet({ code }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="relative">
+      <pre className="bg-gray-900 text-green-300 text-xs font-mono p-4 rounded-xl overflow-x-auto leading-relaxed max-h-56 overflow-y-auto">
+        {code}
+      </pre>
+      <button
+        onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+        className="absolute top-2 right-2 px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded transition-colors"
+      >
+        {copied ? "✓ Copié" : "Copier"}
+      </button>
+    </div>
+  );
+}
+
+function CiIntegrationsSection() {
+  const [activeTab, setActiveTab] = useState("github");
+
+  const repodUrl = API_URL.replace("/api/v1", "") || window.location.origin;
+
+  const ghUpload = `# .github/workflows/repod-upload.yml
+name: Publish RPM to repod
+on:
+  push:
+    tags: ['v*']
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login repod
+        id: login
+        run: |
+          TOKEN=$(curl -sf -X POST \\
+            -H "Content-Type: application/json" \\
+            -d '{"username":"\${{ secrets.REPOD_USERNAME }}","password":"\${{ secrets.REPOD_PASSWORD }}"}' \\
+            "\${{ secrets.REPOD_URL }}/api/v1/auth/token" | jq -r '.access_token')
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+      - name: Upload .rpm
+        run: |
+          for RPM in dist/*.rpm; do
+            curl -sf \\
+              -H "Authorization: Bearer \${{ steps.login.outputs.token }}" \\
+              -F "file=@$RPM" -F "distribution=almalinux8" \\
+              "\${{ secrets.REPOD_URL }}/api/v1/upload/"
+          done`;
+
+  const ghSarif = `# .github/workflows/repod-sarif.yml
+name: Export SARIF to GitHub Security
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+jobs:
+  sarif-export:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Get SARIF from repod
+        run: |
+          TOKEN=$(curl -sf -X POST \\
+            -H "Content-Type: application/json" \\
+            -d '{"username":"\${{ secrets.REPOD_USERNAME }}","password":"\${{ secrets.REPOD_PASSWORD }}"}' \\
+            "\${{ secrets.REPOD_URL }}/api/v1/auth/token" | jq -r '.access_token')
+          curl -sf -H "Authorization: Bearer $TOKEN" \\
+            "\${{ secrets.REPOD_URL }}/api/v1/sbom/sarif" -o repod.sarif.json
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: repod.sarif.json`;
+
+  const glSnippet = `# Dans votre .gitlab-ci.yml
+variables:
+  REPOD_URL: "\$REPOD_URL"          # défini dans CI/CD Settings → Variables
+  REPOD_DISTRIBUTION: "almalinux8"
+  REPOD_ARCH: "x86_64"
+
+publish-rpm:
+  stage: deploy
+  image: curlimages/curl:latest
+  only: [tags]
+  script:
+    - |
+      TOKEN=$(curl -sf -X POST \\
+        -H "Content-Type: application/json" \\
+        -d "{\"username\":\"$REPOD_USERNAME\",\"password\":\"$REPOD_PASSWORD\"}" \\
+        "$REPOD_URL/api/v1/auth/token" | jq -r '.access_token')
+      for RPM in dist/*.rpm; do
+        curl -sf \\
+          -H "Authorization: Bearer $TOKEN" \\
+          -F "file=@$RPM" \\
+          -F "distribution=$REPOD_DISTRIBUTION" \\
+          "$REPOD_URL/api/v1/upload/"
+      done`;
+
+  const cliScript = `# repod-cli.sh — disponible dans examples/ci/repod-cli.sh
+# Usage : ./repod-cli.sh <commande> [args]
+
+./repod-cli.sh login                                    # authenticate
+./repod-cli.sh upload mypackage-1.0-1.x86_64.rpm almalinux8   # upload RPM
+./repod-cli.sh vulnerabilities almalinux8               # list CVEs
+./repod-cli.sh sarif almalinux8 scan.sarif.json         # export SARIF
+
+# Variables d'environnement :
+#   REPOD_URL      (défaut : ${repodUrl})
+#   REPOD_USERNAME / REPOD_PASSWORD`;
+
+  const tabs = [
+    { id: "github", label: "GitHub Actions (upload)" },
+    { id: "sarif",  label: "GitHub SARIF"            },
+    { id: "gitlab", label: "GitLab CI"               },
+    { id: "cli",    label: "CLI Script"              },
+  ];
+
+  const snippets = { github: ghUpload, sarif: ghSarif, gitlab: glSnippet, cli: cliScript };
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3">
+        <svg className="w-5 h-5 text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round"
+            d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+        </svg>
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Intégrations CI/CD</h2>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Snippets prêts à l'emploi pour publier vos paquets RPM depuis votre pipeline.
+          </p>
+        </div>
+      </div>
+
+      <div className="p-6 space-y-4">
+        {/* Onglets */}
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 flex-wrap">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                activeTab === t.id
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <CopySnippet code={snippets[activeTab]} />
+
+        <p className="text-xs text-gray-400">
+          Fichiers complets disponibles dans{" "}
+          <span className="font-mono">examples/ci/</span>{" "}
+          (gitlab-repod.yml, github-*.yml, repod-cli.sh).
+        </p>
       </div>
     </div>
   );

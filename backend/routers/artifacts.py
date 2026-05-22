@@ -10,7 +10,7 @@ Routes pour la gestion des artefacts :
 import os
 import subprocess
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 
 from auth.dependencies import get_current_user, get_admin_user, get_uploader_user, get_maintainer_user, get_auditor_user
@@ -21,6 +21,7 @@ from services.indexer import (
 from services.manifest import load_manifest, list_manifests
 from services.audit import log as audit_log, get_recent_logs, get_package_history
 from services.validator import validate_dependencies, ValidationResult
+from services.pagination import paginate
 
 router = APIRouter(prefix="/artifacts", tags=["Artifacts"])
 
@@ -31,10 +32,23 @@ MANIFEST_DIR = Path(os.getenv("MANIFEST_DIR", "/repos/manifests"))
 # ─── Liste & détail ──────────────────────────────────────────────────────────
 
 @router.get("/")
-def list_artifacts(current_user: str = Depends(get_current_user)):
-    """Liste tous les artefacts avec métadonnées enrichies depuis l'index."""
+def list_artifacts(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    search: str = Query(None),
+    distribution: str = Query(None),
+    current_user: str = Depends(get_current_user),
+):
+    """Liste tous les artefacts RPM avec métadonnées enrichies (paginé)."""
     try:
-        return {"packages": list_packages_from_index()}
+        pkgs = list_packages_from_index()
+        if search:
+            s = search.lower()
+            pkgs = [p for p in pkgs if s in (p.get("name") or "").lower()
+                    or s in (p.get("description") or "").lower()]
+        if distribution and distribution != "all":
+            pkgs = [p for p in pkgs if (p.get("distribution") or "almalinux8") == distribution]
+        return paginate(pkgs, page=page, per_page=per_page)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -233,24 +247,20 @@ def delete_artifact_version(
 
 @router.get("/audit/logs")
 def get_audit_logs(
-    limit: int = 200,
-    package: str = None,
-    action: str = None,
-    result: str = None,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(100, ge=1, le=500),
+    package: str = Query(None),
+    action: str = Query(None),
+    result: str = Query(None),
     current_user: str = Depends(get_auditor_user),
 ):
-    """Retourne les entrées du journal d'audit avec filtres optionnels."""
-    if package:
-        logs = get_package_history(package)
-    else:
-        logs = get_recent_logs(limit=limit)
-
+    """Retourne les entrées du journal d'audit avec filtres optionnels (paginé)."""
+    logs = get_package_history(package) if package else get_recent_logs(limit=10_000)
     if action:
         logs = [l for l in logs if l.get("action", "").upper() == action.upper()]
     if result:
         logs = [l for l in logs if l.get("result", "").upper() == result.upper()]
-
-    return {"logs": logs[:limit], "total": len(logs)}
+    return paginate(logs, page=page, per_page=per_page)
 
 
 @router.post("/admin/sync-index")

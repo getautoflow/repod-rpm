@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { getSbomPreview, getSbomExportUrl, getSbomPackageUrl, getDistributions } from "../api";
+import {
+  getSbomPreview, getSbomExportUrl, getSbomPackageUrl,
+  getSarifExportUrl, getSarifPackageUrl,
+  getDistributions,
+} from "../api";
 import { useAuth } from "../context/AuthContext";
 
 const FORMATS = [
@@ -16,6 +20,13 @@ const FORMATS = [
     badge: "ISO/IEC 5962",
     desc: "Standard ISO. Compatible FOSSA, Black Duck, OpenChain, NTIA.",
     ext: ".spdx.json",
+  },
+  {
+    id: "sarif",
+    label: "SARIF 2.1.0",
+    badge: "GitHub / GitLab",
+    desc: "Rapport de vulnérabilités CVE. Compatible GitHub Code Scanning, GitLab SAST, Azure DevOps.",
+    ext: ".sarif.json",
   },
 ];
 
@@ -60,6 +71,7 @@ export default function SbomPage() {
   }, []);
 
   const loadPreview = useCallback(async () => {
+    if (format === "sarif") { setPreview(null); return; }
     setPreviewLoading(true);
     try {
       const d = await getSbomPreview(format, distribution || null);
@@ -73,11 +85,15 @@ export default function SbomPage() {
 
   useEffect(() => { loadPreview(); }, [loadPreview]);
 
+  const isSarif = format === "sarif";
+
   // Téléchargement via lien authentifié
   const handleExport = async () => {
     setExporting(true);
     try {
-      const url = getSbomExportUrl(format, distribution || null);
+      const url = isSarif
+        ? getSarifExportUrl(distribution || null)
+        : getSbomExportUrl(format, distribution || null);
       const resp = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -85,7 +101,12 @@ export default function SbomPage() {
       const blob = await resp.blob();
       const cd   = resp.headers.get("content-disposition") || "";
       const match = cd.match(/filename="?([^"]+)"?/);
-      const filename = match ? match[1] : `sbom.${format === "cyclonedx" ? "cdx" : "spdx"}.json`;
+      const now  = new Date().toISOString().slice(0, 10);
+      const distrib = distribution ? `-${distribution}` : "";
+      const fallback = isSarif
+        ? `repod${distrib}-${now}.sarif.json`
+        : `sbom.${format === "cyclonedx" ? "cdx" : "spdx"}.json`;
+      const filename = match ? match[1] : fallback;
       const a = document.createElement("a");
       a.href  = URL.createObjectURL(blob);
       a.download = filename;
@@ -99,7 +120,9 @@ export default function SbomPage() {
   };
 
   const handlePackageExport = async (name, version, arch = "x86_64") => {
-    const url = getSbomPackageUrl(name, version, format, arch);
+    const url = isSarif
+      ? getSarifPackageUrl(name, version, arch)
+      : getSbomPackageUrl(name, version, format, arch);
     try {
       const resp = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
@@ -186,7 +209,7 @@ export default function SbomPage() {
         <div className="pt-2 border-t border-gray-100 flex items-center gap-3">
           <button
             onClick={handleExport}
-            disabled={exporting || !preview?.total_packages}
+            disabled={exporting || (!isSarif && !preview?.total_packages)}
             className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700
                        disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm
                        font-semibold rounded-lg transition-colors"
@@ -205,19 +228,56 @@ export default function SbomPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                     d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                 </svg>
-                Exporter le SBOM complet
+                {isSarif ? "Exporter le rapport SARIF" : "Exporter le SBOM complet"}
               </>
             )}
           </button>
           <p className="text-xs text-gray-400">
-            Fichier JSON · format {format === "cyclonedx" ? "CycloneDX v1.5" : "SPDX v2.3"}
-            {distribution ? ` · ${distribution}` : " · toutes distributions"}
+            {isSarif
+              ? `Fichier SARIF 2.1.0 · vulnérabilités CVE${distribution ? " · " + distribution : " · toutes distributions"}`
+              : `Fichier JSON · format ${format === "cyclonedx" ? "CycloneDX v1.5" : "SPDX v2.3"}${distribution ? " · " + distribution : " · toutes distributions"}`
+            }
           </p>
         </div>
       </div>
 
-      {/* Aperçu des composants */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {/* Panneau informatif SARIF (affiché quand format = sarif) */}
+      {isSarif && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-orange-600 shrink-0" fill="none" viewBox="0 0 24 24"
+                 stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <h2 className="text-sm font-semibold text-orange-900">Export SARIF 2.1.0 — Rapport de vulnérabilités RPM</h2>
+          </div>
+          <p className="text-xs text-orange-800">
+            Le fichier SARIF contient l'ensemble des <strong>CVE détectées</strong> sur les paquets
+            RPM du dépôt. Compatible avec :
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { name: "GitHub Code Scanning", color: "blue" },
+              { name: "GitLab SAST Dashboard", color: "purple" },
+              { name: "Azure DevOps", color: "cyan" },
+            ].map((tool) => (
+              <span key={tool.name}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-${tool.color}-100 text-${tool.color}-800`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-current"/>
+                {tool.name}
+              </span>
+            ))}
+          </div>
+          <div className="bg-white rounded-lg border border-orange-100 p-3 text-xs space-y-1">
+            <p className="font-medium text-gray-800">Structure du fichier SARIF</p>
+            <p className="text-gray-500 font-mono">runs[0].tool.driver.rules[] — une règle par CVE unique</p>
+            <p className="text-gray-500 font-mono">runs[0].results[]           — un résultat par (CVE × paquet)</p>
+          </div>
+        </div>
+      )}
+
+      {/* Aperçu des composants (masqué en mode SARIF) */}
+      {!isSarif && <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-gray-800">Aperçu — 5 premiers composants</h2>
@@ -304,7 +364,7 @@ export default function SbomPage() {
             cliquez sur « Exporter » pour obtenir le fichier complet.
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Infos réglementaires */}
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">

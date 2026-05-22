@@ -5,7 +5,7 @@ GET /sbom/{name}/{version} → SBOM d'un paquet précis
 Query params :
   format       : cyclonedx (défaut) | spdx
   distribution : almalinux8 | rocky8 | centos-stream9 | ... | ...
-  arch         : amd64 (défaut)
+  arch         : x86_64 (défaut)
 """
 
 import json
@@ -16,6 +16,7 @@ from fastapi.responses import Response
 
 from auth.dependencies import get_current_user
 from services.sbom import generate_sbom
+from services.sarif import generate_sarif
 
 router = APIRouter(prefix="/sbom", tags=["SBOM"])
 
@@ -33,7 +34,7 @@ def _json_response(data: dict, filename: str) -> Response:
 def export_sbom(
     format: str = Query("cyclonedx", pattern="^(cyclonedx|spdx)$"),
     distribution: str | None = Query(None),
-    arch: str = Query("amd64"),
+    arch: str = Query("x86_64"),
     _user: str = Depends(get_current_user),
 ):
     """Exporte le SBOM de tous les paquets du dépôt (optionnellement filtré)."""
@@ -58,7 +59,7 @@ def export_package_sbom(
     name: str,
     version: str,
     format: str = Query("cyclonedx", pattern="^(cyclonedx|spdx)$"),
-    arch: str = Query("amd64"),
+    arch: str = Query("x86_64"),
     _user: str = Depends(get_current_user),
 ):
     """Exporte le SBOM d'un paquet précis."""
@@ -83,11 +84,66 @@ def export_package_sbom(
     return _json_response(doc, filename)
 
 
+@router.get("/sarif")
+def export_sarif_global(
+    distribution: str | None = Query(None),
+    arch: str = Query("x86_64"),
+    _user: str = Depends(get_current_user),
+):
+    """Exporte les vulnérabilités RPM au format SARIF 2.1.0 (tous paquets ou filtré)."""
+    try:
+        doc = generate_sarif(distribution=distribution, arch=arch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    now     = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    distrib = f"-{distribution}" if distribution else ""
+    filename = f"repod{distrib}-{now}.sarif.json"
+
+    content = json.dumps(doc, indent=2, ensure_ascii=False)
+    return Response(
+        content=content,
+        media_type="application/sarif+json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{name}/{version}/sarif")
+def export_sarif_package(
+    name: str,
+    version: str,
+    arch: str = Query("x86_64"),
+    _user: str = Depends(get_current_user),
+):
+    """Exporte les vulnérabilités d'un paquet RPM précis au format SARIF 2.1.0."""
+    try:
+        doc = generate_sarif(name=name, version=version, arch=arch)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    run = doc["runs"][0]
+    if not run["results"]:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Paquet RPM '{name}' version '{version}' introuvable ou sans CVE.",
+        )
+
+    version_safe = version.replace(":", "_").replace("/", "_")
+    filename = f"repod-{name}-{version_safe}-{arch}.sarif.json"
+
+    content = json.dumps(doc, indent=2, ensure_ascii=False)
+    return Response(
+        content=content,
+        media_type="application/sarif+json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/preview")
 def preview_sbom(
     format: str = Query("cyclonedx", pattern="^(cyclonedx|spdx)$"),
     distribution: str | None = Query(None),
-    arch: str = Query("amd64"),
+    arch: str = Query("x86_64"),
     limit: int = Query(5, ge=1, le=50),
     _user: str = Depends(get_current_user),
 ):

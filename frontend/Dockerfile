@@ -2,8 +2,9 @@
 FROM node:18 AS build
 WORKDIR /app
 
-# L'URL de l'API est injectée au moment du build
-ARG REACT_APP_API_URL=http://localhost:8000
+# URL de l'API — vide = URLs relatives (nginx proxifie /api/ vers le backend)
+# Passer --build-arg REACT_APP_API_URL=http://... pour un accès direct cross-origin
+ARG REACT_APP_API_URL=
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
 
 ARG REACT_APP_REPO_URL=http://localhost:80

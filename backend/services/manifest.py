@@ -1,16 +1,37 @@
 """
 Génération et lecture des manifests d'artefacts RPM.
 Chaque artefact .rpm a un manifest JSON associé stocké dans /repos/manifests/.
+
+Cache in-memory
+───────────────
+list_manifests() est appelée depuis de nombreux endpoints. Le cache in-memory
+avec TTL réduit les accès disque à 1 lecture initiale, puis 0 pendant le TTL.
+
+  • TTL configurable via MANIFEST_CACHE_TTL (secondes, défaut : 30)
+  • Invalidé automatiquement à chaque save_manifest()
+  • Invalidation explicite via invalidate_manifest_cache()
+  • Thread-safe via RLock
+  • Retourne une copie (les appelants ne peuvent pas muter le cache)
 """
 import json
 import hashlib
 import subprocess
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 
 MANIFEST_DIR = Path(os.getenv("MANIFEST_DIR", "/repos/manifests"))
 MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── Cache in-memory ───────────────────────────────────────────────────────────
+
+_CACHE_TTL: float = float(os.getenv("MANIFEST_CACHE_TTL", "30"))
+
+_cache: list[dict] | None = None
+_cache_at: float = 0.0
+_cache_lock: RLock = RLock()
 
 
 def compute_sha256(file_path: str) -> str:
@@ -166,8 +187,20 @@ def generate_manifest(
     return manifest
 
 
+def invalidate_manifest_cache() -> None:
+    """
+    Invalide le cache de list_manifests().
+    Appeler après toute opération qui crée, modifie ou supprime un manifest
+    sans passer par save_manifest() (ex : import batch, quarantaine manuelle).
+    """
+    global _cache, _cache_at
+    with _cache_lock:
+        _cache = None
+        _cache_at = 0.0
+
+
 def save_manifest(manifest: dict) -> str:
-    """Sauvegarde un manifest et retourne son chemin."""
+    """Sauvegarde un manifest, invalide le cache et retourne son chemin."""
     name = manifest["name"]
     version = manifest["version"].replace(":", "_").replace("/", "_").replace(" ", "_")
     arch = manifest["arch"]
@@ -175,6 +208,7 @@ def save_manifest(manifest: dict) -> str:
     path = MANIFEST_DIR / filename
     with open(path, "w") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
+    invalidate_manifest_cache()
     return str(path)
 
 
@@ -189,12 +223,27 @@ def load_manifest(name: str, version: str, arch: str = "x86_64") -> dict | None:
 
 
 def list_manifests() -> list[dict]:
-    """Retourne tous les manifests disponibles."""
-    manifests = []
-    for path in sorted(MANIFEST_DIR.glob("*.manifest.json")):
-        try:
-            with open(path) as f:
-                manifests.append(json.load(f))
-        except Exception:
-            continue
-    return manifests
+    """
+    Retourne tous les manifests disponibles (avec cache in-memory TTL).
+
+    Premier appel → lecture disque + mise en cache.
+    Appels suivants (dans le TTL) → retourne une copie du cache sans I/O.
+    Cache invalidé automatiquement par save_manifest() ou invalidate_manifest_cache().
+    """
+    global _cache, _cache_at
+    with _cache_lock:
+        now = time.monotonic()
+        if _cache is not None and (now - _cache_at) < _CACHE_TTL:
+            return list(_cache)   # copie → les appelants ne mutent pas le cache
+
+        manifests = []
+        for path in sorted(MANIFEST_DIR.glob("*.manifest.json")):
+            try:
+                with open(path) as f:
+                    manifests.append(json.load(f))
+            except Exception:
+                continue
+
+        _cache = manifests
+        _cache_at = now
+        return list(_cache)

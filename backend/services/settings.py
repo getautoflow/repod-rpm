@@ -117,6 +117,26 @@ DEFAULT_SETTINGS: dict = {
         "grype_fail_on": "critical",  # conservé pour compat — remplacé par cve_policy
         "max_upload_size_mb": 500,
     },
+    # ── SSO / OIDC (Authorization Code + PKCE) ────────────────────────────────
+    # Compatible : Keycloak, Authentik, Zitadel, Azure AD (Entra ID), Okta, ADFS…
+    "oidc": {
+        "enabled":          False,
+        "provider_name":    "SSO",          # Libellé du bouton sur la page de login
+        "discovery_url":    "",             # ex. https://sso.example.com/realms/myorg/.well-known/openid-configuration
+        "client_id":        "",
+        "client_secret":    "",
+        "scopes":           "openid email profile",
+        "redirect_uri":     "",             # vide = calculé depuis app_url
+        # Provisioning
+        "auto_provision":   True,           # Créer l'utilisateur repod-rpm au 1er login SSO
+        "default_role":     "reader",       # Rôle par défaut si aucun mapping ne correspond
+        # Mapping des claims IdP → champs repod-rpm
+        "claim_username":   "preferred_username",  # Keycloak / Authentik / Okta
+        "claim_email":      "email",
+        "claim_fullname":   "name",
+        "claim_role":       "",             # Claim portant les groupes/rôles IdP (ex. "groups")
+        "role_map":         {},             # { "idp-group": "repod-role", ... }
+    },
     "cve_policy": {
         # Action par sévérité : "block" | "review" | "warn" | "allow"
         #   block  → rejet immédiat, quarantaine

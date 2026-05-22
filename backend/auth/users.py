@@ -8,9 +8,7 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from passlib.context import CryptContext
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+import bcrypt
 
 AUTH_DB_PATH = Path(os.getenv("AUTH_DB_PATH", "/repos/auth/users.db"))
 _lock = Lock()
@@ -60,22 +58,31 @@ def init_db():
         with _get_db() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS users (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username     TEXT UNIQUE NOT NULL,
-                    hashed_password TEXT NOT NULL,
-                    role         TEXT NOT NULL DEFAULT 'reader',
-                    full_name    TEXT NOT NULL DEFAULT '',
-                    email        TEXT NOT NULL DEFAULT '',
-                    active       INTEGER NOT NULL DEFAULT 1,
-                    created_at   TEXT NOT NULL,
-                    last_login   TEXT,
-                    auth_source  TEXT NOT NULL DEFAULT 'local'
+                    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username             TEXT UNIQUE NOT NULL,
+                    hashed_password      TEXT NOT NULL,
+                    role                 TEXT NOT NULL DEFAULT 'reader',
+                    full_name            TEXT NOT NULL DEFAULT '',
+                    email                TEXT NOT NULL DEFAULT '',
+                    active               INTEGER NOT NULL DEFAULT 1,
+                    created_at           TEXT NOT NULL,
+                    last_login           TEXT,
+                    auth_source          TEXT NOT NULL DEFAULT 'local',
+                    mfa_enabled          INTEGER NOT NULL DEFAULT 0,
+                    totp_secret          TEXT,
+                    totp_pending_secret  TEXT
                 );
             """)
-            # Migration : ajouter auth_source si absente (DB existante)
+            # Migrations : ajouter les colonnes si absentes (DB existante)
             cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
             if "auth_source" not in cols:
                 conn.execute("ALTER TABLE users ADD COLUMN auth_source TEXT NOT NULL DEFAULT 'local'")
+            if "mfa_enabled" not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0")
+            if "totp_secret" not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN totp_secret TEXT")
+            if "totp_pending_secret" not in cols:
+                conn.execute("ALTER TABLE users ADD COLUMN totp_pending_secret TEXT")
 
             # Insérer l'admin depuis l'env si la table est vide
             # IMPORTANT : le INSERT doit rester dans le bloc "with conn:" pour être commité
@@ -93,11 +100,14 @@ def init_db():
 
 
 def hash_password(plain: str) -> str:
-    return pwd_context.hash(plain)
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
 
 def get_user(username: str) -> dict | None:
@@ -199,3 +209,76 @@ def update_last_login(username: str):
     with _lock:
         with _get_db() as conn:
             conn.execute("UPDATE users SET last_login = ? WHERE username = ?", (now, username))
+
+
+# ─── MFA TOTP ─────────────────────────────────────────────────────────────────
+
+def get_mfa_info(username: str) -> dict | None:
+    """
+    Retourne les informations MFA d'un utilisateur :
+    {mfa_enabled, totp_secret, totp_pending_secret}
+    Retourne None si l'utilisateur est introuvable.
+    """
+    init_db()
+    with _lock:
+        with _get_db() as conn:
+            row = conn.execute(
+                "SELECT mfa_enabled, totp_secret, totp_pending_secret "
+                "FROM users WHERE username = ?",
+                (username,)
+            ).fetchone()
+    if not row:
+        return None
+    return {
+        "mfa_enabled":         bool(row["mfa_enabled"]),
+        "totp_secret":         row["totp_secret"],
+        "totp_pending_secret": row["totp_pending_secret"],
+    }
+
+
+def set_totp_pending(username: str, pending_secret: str) -> bool:
+    """Stocke le secret TOTP temporaire en attendant la confirmation par l'utilisateur."""
+    init_db()
+    with _lock:
+        with _get_db() as conn:
+            result = conn.execute(
+                "UPDATE users SET totp_pending_secret = ? WHERE username = ?",
+                (pending_secret, username)
+            )
+    return result.rowcount > 0
+
+
+def enable_mfa(username: str) -> bool:
+    """
+    Active le MFA : copie totp_pending_secret → totp_secret, met mfa_enabled=1,
+    efface le secret temporaire.
+    Retourne False si l'utilisateur n'a pas de pending_secret.
+    """
+    init_db()
+    with _lock:
+        with _get_db() as conn:
+            row = conn.execute(
+                "SELECT totp_pending_secret FROM users WHERE username = ?",
+                (username,)
+            ).fetchone()
+            if not row or not row["totp_pending_secret"]:
+                return False
+            conn.execute(
+                "UPDATE users SET mfa_enabled = 1, totp_secret = totp_pending_secret, "
+                "totp_pending_secret = NULL WHERE username = ?",
+                (username,)
+            )
+    return True
+
+
+def disable_mfa(username: str) -> bool:
+    """Désactive le MFA et efface les secrets TOTP de l'utilisateur."""
+    init_db()
+    with _lock:
+        with _get_db() as conn:
+            result = conn.execute(
+                "UPDATE users SET mfa_enabled = 0, totp_secret = NULL, "
+                "totp_pending_secret = NULL WHERE username = ?",
+                (username,)
+            )
+    return result.rowcount > 0

@@ -9,6 +9,7 @@ Pipeline d'upload complet pour paquets RPM :
 POST /upload/        → réponse JSON
 POST /upload/stream  → réponse SSE workflow en temps réel
 """
+import asyncio
 import json
 import os
 import shutil
@@ -25,6 +26,8 @@ from services.manifest import generate_manifest, save_manifest
 from services.indexer import add_to_index
 from services.audit import log as audit_log
 from services.notifications import notify_pending_review
+from services.email_notifications import notify_pending_review_email
+from services.cve_utils import compute_cve_summary
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
@@ -76,8 +79,10 @@ async def upload_package(
                   detail=f"Erreur écriture staging: {e}")
         raise HTTPException(status_code=500, detail="Erreur lors de la sauvegarde du fichier")
 
-    # Pipeline de validation
-    validation = run_validation_pipeline(str(staging_path), strict_deps=False, distro=distribution)
+    # Pipeline de validation (Grype ≤ 300 s) — exécuté dans le thread pool
+    validation = await asyncio.to_thread(
+        run_validation_pipeline, str(staging_path), strict_deps=False, distro=distribution
+    )
 
     if not validation.passed:
         quarantine_path = STAGING_QUARANTINE / safe_filename
@@ -110,10 +115,11 @@ async def upload_package(
     manifest_path = save_manifest(manifest)
     add_to_index(manifest)
 
-    # Ajout au dépôt RPM via add-rpm.sh (createrepo_c)
+    # Ajout au dépôt RPM via add-rpm.sh (createrepo_c) — thread pool
     createrepo_ok = False
     if cve_status != "pending_review":
-        r = subprocess.run(
+        r = await asyncio.to_thread(
+            subprocess.run,
             ["sh", ADD_RPM_SCRIPT, distribution, pool_path.name],
             capture_output=True, text=True,
             env={**os.environ,
@@ -139,15 +145,17 @@ async def upload_package(
 
     if cve_status == "pending_review":
         try:
-            cve_counts, kev_count = {}, 0
-            _sev_order = ["Critical", "High", "Medium", "Low", "Negligible"]
-            for cve in (validation.cve_results or []):
-                sev = cve.get("severity", "Unknown")
-                cve_counts[sev] = cve_counts.get(sev, 0) + 1
-                if cve.get("in_kev"):
-                    kev_count += 1
-            worst = next((s for s in _sev_order if cve_counts.get(s, 0) > 0), None)
+            cve_counts, kev_count, worst = compute_cve_summary(validation.cve_results or [])
             notify_pending_review(
+                package=manifest["name"],
+                version=manifest["version"],
+                arch=manifest["arch"],
+                distribution=distribution,
+                cve_counts=cve_counts,
+                worst_severity=worst,
+                kev_count=kev_count,
+            )
+            notify_pending_review_email(
                 package=manifest["name"],
                 version=manifest["version"],
                 arch=manifest["arch"],
@@ -194,7 +202,7 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _upload_stream_generator(safe_filename: str, staging_path: Path, distribution: str, current_user: str):
+async def _upload_stream_generator(safe_filename: str, staging_path: Path, distribution: str, current_user: str):
     def step(name: str, label: str, status: str, message: str = "", detail: str = ""):
         return _sse("step", {"name": name, "label": label, "status": status,
                              "message": message, "detail": detail})
@@ -205,7 +213,10 @@ def _upload_stream_generator(safe_filename: str, staging_path: Path, distributio
         yield step("validation", "Pipeline de validation", "running",
                    "Vérification format, intégrité, antivirus, CVE, dépendances...")
 
-        validation = run_validation_pipeline(str(staging_path), strict_deps=False, distro=distribution)
+        # Grype peut prendre jusqu'à 300 s — exécuté dans le thread pool
+        validation = await asyncio.to_thread(
+            run_validation_pipeline, str(staging_path), strict_deps=False, distro=distribution
+        )
 
         step_labels = {
             "format":       "Format .rpm",
@@ -267,7 +278,8 @@ def _upload_stream_generator(safe_filename: str, staging_path: Path, distributio
         if cve_status != "pending_review":
             yield step("createrepo", "Mise à jour dépôt RPM (createrepo_c)", "running",
                        f"Distribution : {distribution}")
-            r = subprocess.run(
+            r = await asyncio.to_thread(
+                subprocess.run,
                 ["sh", ADD_RPM_SCRIPT, distribution, pool_path.name],
                 capture_output=True, text=True,
                 env={**os.environ,

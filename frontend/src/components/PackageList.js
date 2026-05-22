@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import toast from "react-hot-toast";
 import { listArtifacts, deleteArtifact, syncIndex, getArtifact, resolveDependencies, getApiBaseUrl, getPackageCve, getPackageDecision, getAuditLogs } from "../api";
+import Paginator from "./Paginator";
 
 const REPO_URL = process.env.REACT_APP_REPO_URL || "http://localhost:80";
 const API_URL = getApiBaseUrl();
@@ -361,13 +362,13 @@ function InspectPanel({ pkg, onClose }) {
       resolveDependencies(pkg.name).catch(() => null),
       version ? getPackageCve(pkg.name, version, arch).catch(() => null) : Promise.resolve(null),
       version ? getPackageDecision(pkg.name, version, arch).catch(() => null) : Promise.resolve(null),
-      getAuditLogs({ package: pkg.name, limit: 50 }).catch(() => ({ logs: [] })),
+      getAuditLogs({ package: pkg.name, per_page: 50, page: 1 }).catch(() => ({ items: [] })),
     ]).then(([d, r, c, dec, audit]) => {
       setDetail(d);
       setDeps(r);
       setCve(c);
       setDecision(dec);
-      setAudit(audit?.logs || []);
+      setAudit(audit?.items || []);
     }).finally(() => setLoading(false));
   }, [pkg.name, pkg.latest_version, pkg.version, pkg.arch]);
 
@@ -717,25 +718,50 @@ const DISTRIB_COLORS = {
   "opensuse-tumbleweed": "bg-cyan-100 text-cyan-700",
 };
 
-export default function PackageList() {
-  const [packages, setPackages]         = useState([]);
-  const [filter, setFilter]             = useState("");
-  const [distribFilter, setDistribFilter] = useState("all");
-  const [loading, setLoading]           = useState(true);
-  const [deleting, setDeleting]         = useState("");
-  const [syncing, setSyncing]           = useState(false);
-  const [inspecting, setInspecting]     = useState(null);
-  const [resolving, setResolving]       = useState(null);
+const PER_PAGE = 50;
 
-  const fetchPackages = useCallback(() => {
+export default function PackageList() {
+  const [packages, setPackages]             = useState([]);
+  const [page, setPage]                     = useState(1);
+  const [pages, setPages]                   = useState(1);
+  const [total, setTotal]                   = useState(0);
+  const [searchInput, setSearchInput]       = useState("");
+  const [filter, setFilter]                 = useState("");
+  const [distribFilter, setDistribFilter]   = useState("all");
+  const [loading, setLoading]               = useState(true);
+  const [deleting, setDeleting]             = useState("");
+  const [syncing, setSyncing]               = useState(false);
+  const [inspecting, setInspecting]         = useState(null);
+  const [resolving, setResolving]           = useState(null);
+  const [fetchTrigger, setFetchTrigger]     = useState(0);
+
+  const timerRef = useRef(null);
+
+  // Debounce: searchInput → filter (350 ms), reset page
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      setFilter(searchInput);
+      setPage(1);
+    }, 350);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [searchInput]);
+
+  // Fetch when page / filter / distribFilter / fetchTrigger changes
+  useEffect(() => {
     setLoading(true);
-    listArtifacts()
-      .then((data) => setPackages(data.packages || []))
+    listArtifacts(page, PER_PAGE, filter || null, distribFilter === "all" ? null : distribFilter)
+      .then((data) => {
+        setPackages(data.items || []);
+        setPage(data.page   || 1);
+        setPages(data.pages || 1);
+        setTotal(data.total || 0);
+      })
       .catch(() => toast.error("Impossible de charger les paquets"))
       .finally(() => setLoading(false));
-  }, []);
+  }, [page, filter, distribFilter, fetchTrigger]); // eslint-disable-line
 
-  useEffect(() => { fetchPackages(); }, [fetchPackages]);
+  const refresh = useCallback(() => setFetchTrigger((t) => t + 1), []);
 
   const handleDelete = async (name) => {
     if (!window.confirm(`Supprimer ${name} du dépôt ?`)) return;
@@ -744,7 +770,7 @@ export default function PackageList() {
       await deleteArtifact(name);
       toast.success(`${name} supprimé`);
       if (inspecting?.name === name) setInspecting(null);
-      fetchPackages();
+      refresh();
     } catch {
       toast.error(`Impossible de supprimer ${name}`);
     } finally {
@@ -757,7 +783,7 @@ export default function PackageList() {
     try {
       const result = await syncIndex();
       toast.success(`Index synchronisé — ${result.packages_indexed} paquet(s)`);
-      fetchPackages();
+      refresh();
     } catch {
       toast.error("Échec de la synchronisation");
     } finally {
@@ -767,21 +793,21 @@ export default function PackageList() {
 
   const handleResolved = useCallback((hadErrors) => {
     setResolving(null);
-    fetchPackages();
+    refresh();
     if (hadErrors) {
       toast.error("Import partiel — vérifiez les logs. Pensez à synchroniser les sources RPM si des paquets sont introuvables.", { duration: 6000 });
     } else {
       toast.success("Dépendances importées — liste mise à jour");
     }
-  }, [fetchPackages]);
+  }, [refresh]);
 
-  const visible = packages.filter((p) => {
-    const textMatch = p.name.toLowerCase().includes(filter.toLowerCase()) ||
-      p.description?.toLowerCase().includes(filter.toLowerCase());
-    const distMatch = distribFilter === "all" ||
-      (p.distribution || "almalinux8") === distribFilter;
-    return textMatch && distMatch;
-  });
+  const handleDistribChange = (id) => {
+    setDistribFilter(id);
+    setPage(1);
+  };
+
+  // visible = packages already filtered server-side (current page only)
+  const visible = packages;
 
   return (
     <>
@@ -801,7 +827,7 @@ export default function PackageList() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Paquets disponibles</h1>
             <p className="text-sm text-gray-500 mt-0.5">
-              {packages.length} paquet(s) — accessible via{" "}
+              {total} paquet(s) — accessible via{" "}
               <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs font-mono">dnf install</code>
             </p>
           </div>
@@ -822,8 +848,8 @@ export default function PackageList() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0" />
           </svg>
-          <input type="text" placeholder="Rechercher un paquet..." value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+          <input type="text" placeholder="Rechercher un paquet..." value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm
                        focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
         </div>
@@ -831,23 +857,23 @@ export default function PackageList() {
         {/* Filtre par distribution */}
         <div className="flex items-center gap-2 flex-wrap">
           {DISTRIB_TABS.map((tab) => {
-            const count = tab.id === "all"
-              ? packages.length
-              : packages.filter((p) => (p.distribution || "almalinux8") === tab.id).length;
+            const isActive = distribFilter === tab.id;
             return (
               <button
                 key={tab.id}
-                onClick={() => setDistribFilter(tab.id)}
+                onClick={() => handleDistribChange(tab.id)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                  distribFilter === tab.id
+                  isActive
                     ? "bg-blue-600 text-white border-blue-600"
                     : "text-gray-500 border-gray-200 hover:border-blue-400 hover:text-blue-600"
                 }`}
               >
                 {tab.label}
-                <span className={`px-1.5 py-0.5 rounded text-xs ${
-                  distribFilter === tab.id ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"
-                }`}>{count}</span>
+                {isActive && (
+                  <span className="px-1.5 py-0.5 rounded text-xs bg-white/20 text-white">
+                    {total}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1049,6 +1075,14 @@ export default function PackageList() {
               </tbody>
             </table>
           )}
+          <Paginator
+            page={page}
+            pages={pages}
+            total={total}
+            perPage={PER_PAGE}
+            onPageChange={(p) => setPage(p)}
+            loading={loading}
+          />
         </div>
       </div>
     </>

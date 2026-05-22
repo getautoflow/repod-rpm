@@ -27,9 +27,11 @@ from .api_tokens import create_token, list_tokens, revoke_token, PREFIX as API_T
 from .users import (
     get_user, get_user_any, list_users, create_user,
     update_user, delete_user, change_password, verify_password, update_last_login,
+    get_mfa_info, set_totp_pending, enable_mfa, disable_mfa,
     VALID_ROLES, ROLE_DESCRIPTIONS,
 )
-from .jwt import create_access_token
+from .jwt import create_access_token, create_mfa_token
+from .mfa import generate_totp_secret, get_totp_uri, generate_qr_code_base64, verify_totp
 from .dependencies import get_current_user, get_current_user_full, get_admin_user
 from .reset_tokens import create_reset_token, consume_reset_token
 from limiter import limiter, auth_limit
@@ -162,6 +164,21 @@ def login(request: Request, credentials: UserLogin):
         }
 
     update_last_login(user["username"])
+
+    # ── MFA : si activé, retourner un token temporaire ───────────────────────
+    mfa = get_mfa_info(user["username"])
+    if mfa and mfa.get("mfa_enabled"):
+        mfa_token = create_mfa_token(user["username"], user["role"])
+        audit_log("LOGIN", user["username"], "MFA_REQUIRED",
+                  extra={"ip": client_ip, "role": user["role"]})
+        # On retourne mfa_required=True — le frontend redirige vers l'écran TOTP
+        return {
+            "access_token": "",
+            "token_type":   "bearer",
+            "mfa_required": True,
+            "mfa_token":    mfa_token,
+        }
+
     audit_log("LOGIN", user["username"], "SUCCESS",
               extra={"ip": client_ip, "role": user["role"]})
     token = create_access_token({
@@ -181,12 +198,13 @@ def me(current_user: dict = Depends(get_current_user_full)):
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur introuvable")
     return {
-        "username": user["username"],
-        "role": user["role"],
-        "full_name": user.get("full_name", ""),
-        "email": user.get("email", ""),
-        "active": bool(user["active"]),
-        "last_login": user.get("last_login"),
+        "username":    user["username"],
+        "role":        user["role"],
+        "full_name":   user.get("full_name", ""),
+        "email":       user.get("email", ""),
+        "active":      bool(user["active"]),
+        "last_login":  user.get("last_login"),
+        "mfa_enabled": bool(user.get("mfa_enabled", False)),
     }
 
 
@@ -399,6 +417,128 @@ def reset_password_with_token(request: Request, payload: ResetPasswordPayload):
     audit_log("PASSWORD_RESET", username, "SUCCESS", detail="Reset via token email")
     _logger.info(f"[reset] Mot de passe réinitialisé pour {username}")
     return {"status": "ok", "message": "Mot de passe modifié. Vous pouvez vous connecter."}
+
+
+# ─── MFA TOTP ─────────────────────────────────────────────────────────────────
+
+class MfaConfirmPayload(BaseModel):
+    totp_code: str
+
+class MfaAuthPayload(BaseModel):
+    mfa_token: str
+    totp_code: str
+
+class MfaDisablePayload(BaseModel):
+    totp_code: str
+
+
+@router.post("/mfa/setup")
+def mfa_setup(current_user: dict = Depends(get_current_user_full)):
+    """
+    Étape 1 — Génère un secret TOTP et retourne le QR code.
+    Le secret est stocké temporairement (totp_pending_secret).
+    L'activation n'est effective qu'après /mfa/confirm.
+    """
+    username = current_user["username"]
+    secret   = generate_totp_secret()
+    uri      = get_totp_uri(secret, username)
+    qr_b64   = generate_qr_code_base64(uri)
+    set_totp_pending(username, secret)
+    return {
+        "qr_code":    f"data:image/png;base64,{qr_b64}",
+        "secret":     secret,
+        "uri":        uri,
+        "issuer":     "repod-rpm",
+        "username":   username,
+    }
+
+
+@router.post("/mfa/confirm")
+def mfa_confirm(
+    payload: MfaConfirmPayload,
+    current_user: dict = Depends(get_current_user_full),
+):
+    """
+    Étape 2 — L'utilisateur soumet un code TOTP depuis son authenticator.
+    Si correct → active le MFA définitivement.
+    """
+    username = current_user["username"]
+    mfa_info = get_mfa_info(username)
+    if not mfa_info or not mfa_info.get("totp_pending_secret"):
+        raise HTTPException(status_code=400, detail="Aucun secret TOTP en attente. Lancez /mfa/setup d'abord.")
+
+    if not verify_totp(mfa_info["totp_pending_secret"], payload.totp_code):
+        raise HTTPException(status_code=400, detail="Code TOTP invalide.")
+
+    enable_mfa(username)
+    audit_log("MFA_ENABLE", username, "SUCCESS", detail="MFA TOTP activé")
+    return {"status": "ok", "message": "MFA activé avec succès."}
+
+
+@router.post("/mfa/authenticate")
+@limiter.limit(auth_limit)
+def mfa_authenticate(request: Request, payload: MfaAuthPayload):
+    """
+    Étape 2 du login avec MFA.
+    Reçoit le token temporaire (mfa_token) et le code TOTP.
+    Retourne le vrai access_token si le code est correct.
+    """
+    from jose import JWTError, jwt as jose_jwt
+    from .config import SECRET_KEY, ALGORITHM
+
+    # Vérifier le token MFA temporaire
+    try:
+        data = jose_jwt.decode(payload.mfa_token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token MFA invalide ou expiré.")
+
+    if data.get("scope") != "mfa_required":
+        raise HTTPException(status_code=401, detail="Token invalide (scope incorrect).")
+
+    username = data.get("sub")
+    role     = data.get("role", "reader")
+
+    user = get_user_any(username)
+    if not user or not user.get("active", True):
+        raise HTTPException(status_code=401, detail="Utilisateur introuvable ou inactif.")
+
+    mfa_info = get_mfa_info(username)
+    if not mfa_info or not mfa_info.get("totp_secret"):
+        raise HTTPException(status_code=400, detail="MFA non configuré pour cet utilisateur.")
+
+    if not verify_totp(mfa_info["totp_secret"], payload.totp_code):
+        audit_log("LOGIN", username, "FAILURE", detail="Code TOTP invalide")
+        raise HTTPException(status_code=401, detail="Code TOTP invalide.")
+
+    audit_log("LOGIN", username, "SUCCESS", extra={"method": "mfa_totp", "role": role})
+    token = create_access_token({
+        "sub":       username,
+        "role":      role,
+        "full_name": user.get("full_name", ""),
+    })
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@router.post("/mfa/disable")
+def mfa_disable(
+    payload: MfaDisablePayload,
+    current_user: dict = Depends(get_current_user_full),
+):
+    """
+    Désactive le MFA après vérification d'un code TOTP courant
+    (évite la désactivation accidentelle ou non autorisée).
+    """
+    username = current_user["username"]
+    mfa_info = get_mfa_info(username)
+    if not mfa_info or not mfa_info.get("mfa_enabled"):
+        raise HTTPException(status_code=400, detail="Le MFA n'est pas activé.")
+
+    if not verify_totp(mfa_info["totp_secret"], payload.totp_code):
+        raise HTTPException(status_code=400, detail="Code TOTP invalide.")
+
+    disable_mfa(username)
+    audit_log("MFA_DISABLE", username, "SUCCESS", detail="MFA TOTP désactivé")
+    return {"status": "ok", "message": "MFA désactivé."}
 
 
 # ─── Tokens d'API (CI/CD) ─────────────────────────────────────────────────────

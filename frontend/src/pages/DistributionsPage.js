@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import toast from "react-hot-toast";
 import {
   getDistributions, getDistribPackages,
@@ -160,8 +160,10 @@ export default function DistributionsPage() {
   const [loadingPkgs, setLoadingPkgs] = useState(false);
   const [showPromote, setShowPromote] = useState(false);
   const [initing, setIniting] = useState(false);
+  // Protège contre les double-appels à auto-init sur le même montage
+  const autoInitDone = useRef(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, []); // eslint-disable-line
 
   useEffect(() => {
     if (!selectedDist) return;
@@ -176,7 +178,14 @@ export default function DistributionsPage() {
     setLoading(true);
     try {
       const data = await getDistributions();
-      setDistribs(data.distributions || []);
+      const dists = data.distributions || [];
+      setDistribs(dists);
+      // Auto-init silencieux : si toutes les distributions n'ont aucun paquet,
+      // createrepo_c n'a probablement pas encore été initialisé.
+      if (!autoInitDone.current && dists.length > 0 && dists.every((d) => d.package_count === 0)) {
+        autoInitDone.current = true;
+        initDistributions().then(() => load()).catch(() => {});
+      }
     } catch {
       toast.error("Impossible de charger les distributions");
     } finally {

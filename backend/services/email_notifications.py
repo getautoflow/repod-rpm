@@ -42,16 +42,17 @@ def _get_email_cfg() -> dict | None:
     return cfg
 
 
-def _send_email(subject: str, body_html: str, body_text: str) -> bool:
-    """Envoie un email via SMTP. Retourne True si OK."""
-    cfg = _get_email_cfg()
-    if not cfg:
-        return False
-
-    recipients = [r.strip() for r in cfg["to_addresses"].split(",") if r.strip()]
-    if not recipients:
-        return False
-
+def _send_email_to(
+    subject: str,
+    body_html: str,
+    body_text: str,
+    cfg: dict,
+    recipients: list[str],
+) -> tuple[bool, str | None]:
+    """
+    Envoie un email à une liste explicite de destinataires.
+    Retourne (True, None) si OK, (False, message_erreur) sinon.
+    """
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"[repod] {subject}"
     msg["From"]    = cfg.get("from_address", cfg.get("smtp_user", "repod@localhost"))
@@ -65,24 +66,67 @@ def _send_email(subject: str, body_html: str, body_text: str) -> bool:
     user = cfg.get("smtp_user", "")
     pwd  = cfg.get("smtp_password", "")
     tls  = cfg.get("use_tls", True)
+    # Port 465 = SSL direct (SMTP_SSL) ; port 587/25 = STARTTLS ou plain
+    use_ssl = (port == 465)
 
     try:
         context = ssl.create_default_context()
-        with smtplib.SMTP(host, port, timeout=10) as server:
-            if tls:
+        if use_ssl:
+            cm = smtplib.SMTP_SSL(host, port, timeout=30, context=context)
+        else:
+            cm = smtplib.SMTP(host, port, timeout=30)
+        with cm as server:
+            if not use_ssl and tls:
                 server.starttls(context=context)
             if user and pwd:
                 server.login(user, pwd)
             server.sendmail(msg["From"], recipients, msg.as_string())
         logger.info(f"[email] Envoyé '{subject}' → {recipients}")
-        return True
+        return True, None
     except smtplib.SMTPAuthenticationError as e:
-        logger.error(f"[email] Authentification SMTP échouée : {e}")
+        err = f"Authentification SMTP échouée ({host}:{port}) — vérifiez smtp_user et smtp_password"
+        logger.error(f"[email] {err} : {e}")
+        return False, err
     except smtplib.SMTPConnectError as e:
-        logger.error(f"[email] Connexion SMTP impossible ({host}:{port}) : {e}")
+        err = f"Connexion SMTP impossible ({host}:{port}) : {e}"
+        logger.error(f"[email] {err}")
+        return False, err
+    except TimeoutError as e:
+        err = f"Timeout connexion SMTP ({host}:{port}) — serveur trop lent ou port bloqué"
+        logger.error(f"[email] {err} : {e}")
+        return False, err
     except Exception as e:
+        err = f"Erreur SMTP ({type(e).__name__}) : {e}"
         logger.error(f"[email] Erreur envoi : {e}")
-    return False
+        return False, err
+
+
+def _send_email(
+    subject: str,
+    body_html: str,
+    body_text: str,
+    to_override: str | None = None,
+) -> bool:
+    """
+    Envoie un email aux destinataires configurés (ou à to_override). Retourne True si OK.
+
+    to_override : si fourni et non-vide, remplace to_addresses pour cet envoi.
+                  Usage : reset password, notifications par utilisateur.
+    """
+    cfg = _get_email_cfg()
+    if not cfg:
+        return False
+
+    if to_override is not None:
+        stripped = to_override.strip()
+        recipients = [stripped] if stripped else []
+    else:
+        recipients = [r.strip() for r in cfg["to_addresses"].split(",") if r.strip()]
+
+    if not recipients:
+        return False
+    ok, _ = _send_email_to(subject, body_html, body_text, cfg, recipients)
+    return ok
 
 
 def _base_style() -> str:
@@ -301,7 +345,9 @@ def send_test_email(to_override: str | None = None) -> dict:
     """Envoie un email de test. Retourne {ok, error}."""
     cfg = get_settings().get("email", {})
     if not cfg.get("enabled"):
-        return {"ok": False, "error": "Notifications email désactivées"}
+        return {"ok": False, "error": "Notifications email désactivées dans les paramètres"}
+    if not cfg.get("smtp_host"):
+        return {"ok": False, "error": "smtp_host non configuré"}
 
     html = f"""<!DOCTYPE html><html><head>{_base_style()}</head><body>
     <div class='card'>
@@ -313,19 +359,16 @@ def send_test_email(to_override: str | None = None) -> dict:
           Envoyé le : {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')}
         </p>
       </div>
-      <div class='footer'>repod APT Repository Manager</div>
+      <div class='footer'>repod RPM Repository Manager</div>
     </div></body></html>"""
+    text = "Test email repod — configuration SMTP OK"
 
-    # Override temporaire du destinataire si fourni
-    if to_override:
-        orig = cfg.get("to_addresses", "")
-        try:
-            from services.settings import update_settings
-            update_settings({"email": {"to_addresses": to_override}})
-            ok = _send_email("Test de configuration SMTP", html, "Test email repod — configuration SMTP OK")
-        finally:
-            update_settings({"email": {"to_addresses": orig}})
-    else:
-        ok = _send_email("Test de configuration SMTP", html, "Test email repod — configuration SMTP OK")
+    # Envoi direct sans modifier settings.json
+    recipients = [to_override.strip()] if to_override else [
+        r.strip() for r in cfg.get("to_addresses", "").split(",") if r.strip()
+    ]
+    if not recipients:
+        return {"ok": False, "error": "Aucun destinataire configuré (to_addresses vide)"}
 
-    return {"ok": ok, "error": None if ok else "Échec d'envoi — vérifiez les logs backend"}
+    ok, err = _send_email_to("Test de configuration SMTP", html, text, cfg, recipients)
+    return {"ok": ok, "error": err}
