@@ -1147,7 +1147,7 @@ export default function SecurityPage() {
     setRunning(true);
 
     const token = localStorage.getItem("token");
-    fetch(`${API_URL}/security/clamav/update`, {
+    fetch(`${API_URL}/api/v1/security/clamav/update`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
     }).then(async (resp) => {

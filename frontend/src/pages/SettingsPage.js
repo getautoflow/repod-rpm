@@ -153,7 +153,7 @@ function SyncSection({ settings, onChange }) {
     setDone(false);
     setRunning(true);
 
-    fetch(`${API_URL}/import/sync-security`, {
+    fetch(`${API_URL}/api/v1/import/sync-security`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({}),

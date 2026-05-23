@@ -254,6 +254,7 @@ export const getAuditLogs = (params = {}) => {
   if (params.package)  qs.set("package",  params.package);
   if (params.action)   qs.set("action",   params.action);
   if (params.result)   qs.set("result",   params.result);
+  if (params.q)        qs.set("q",        params.q);
   return api.get(`${V1}/artifacts/audit/logs?${qs}`).then((r) => r.data);
 };
 

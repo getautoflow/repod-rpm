@@ -62,6 +62,7 @@ export default function AuditPage() {
         package:  packageFilter || undefined,
         action:   actionFilter  || undefined,
         result:   resultFilter  || undefined,
+        q:        search        || undefined,
       });
       setLogs(data.items || []);
       setTotal(data.total || 0);
@@ -72,18 +73,12 @@ export default function AuditPage() {
     } finally {
       setLoading(false);
     }
-  }, [packageFilter, actionFilter, resultFilter]);
+  }, [packageFilter, actionFilter, resultFilter, search]);
 
   useEffect(() => { load(1); }, [load]);
 
-  // Filtre texte client-side sur la page courante
-  const visible = logs.filter(l =>
-    !search ||
-    l.package?.toLowerCase().includes(search.toLowerCase()) ||
-    l.user?.toLowerCase().includes(search.toLowerCase()) ||
-    l.detail?.toLowerCase().includes(search.toLowerCase()) ||
-    l.action?.toLowerCase().includes(search.toLowerCase())
-  );
+  // Tous les filtres sont désormais server-side — visible = logs complets de la page
+  const visible = logs;
 
   return (
     <div style={{ padding: "24px 28px 40px", background: "#F8FAFC", minHeight: "100%" }}>
@@ -104,7 +99,7 @@ export default function AuditPage() {
             viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
-          <input value={search} onChange={e => setSearch(e.target.value)}
+          <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
             placeholder="Filtrer par paquet, utilisateur, détail…"
             style={{ width:"100%", paddingLeft:32, paddingRight:12, paddingTop:8, paddingBottom:8, border:"1px solid #E2E8F0", borderRadius:8, fontSize:13, outline:"none", background:"#fff", boxSizing:"border-box" }}/>
         </div>

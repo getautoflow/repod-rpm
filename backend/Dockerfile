@@ -9,7 +9,11 @@ RUN pip install --target=/dependencies -r requirements.txt
 FROM python:3.10-slim
 
 # Outils RPM + sécurité
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Acquire::Check-Valid-Until "false" évite l'erreur "not valid yet" si
+# l'horloge système de l'hôte est légèrement en avance sur les miroirs Debian.
+RUN echo 'Acquire::Check-Valid-Until "false";' \
+        > /etc/apt/apt.conf.d/99no-check-valid-until \
+    && apt-get update && apt-get install -y --no-install-recommends \
     # Manipulation RPM
     rpm \
     createrepo-c \

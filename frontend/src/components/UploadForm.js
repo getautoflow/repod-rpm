@@ -1,8 +1,11 @@
 import { useCallback, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import toast from "react-hot-toast";
+import { getApiBaseUrl } from "../api";
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
+// "" quand REACT_APP_API_URL n'est pas défini → URLs relatives → proxiées par nginx
+// "http://host:8000" quand défini → requêtes directes vers le backend
+const API_URL = getApiBaseUrl();
 
 const DISTRIBUTIONS = [
   { codename: "almalinux8",        label: "AlmaLinux 8",           star: true },
@@ -182,7 +185,7 @@ export default function UploadForm() {
     formData.append("distribution", distribution);
 
     try {
-      const resp = await fetch(`${API_URL}/upload/stream`, {
+      const resp = await fetch(`${API_URL}/api/v1/upload/stream`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: formData,

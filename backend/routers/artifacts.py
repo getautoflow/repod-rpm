@@ -252,6 +252,7 @@ def get_audit_logs(
     package: str = Query(None),
     action: str = Query(None),
     result: str = Query(None),
+    q: str = Query(None, description="Recherche texte libre sur package, user, detail"),
     current_user: str = Depends(get_auditor_user),
 ):
     """Retourne les entrées du journal d'audit avec filtres optionnels (paginé)."""
@@ -260,6 +261,14 @@ def get_audit_logs(
         logs = [l for l in logs if l.get("action", "").upper() == action.upper()]
     if result:
         logs = [l for l in logs if l.get("result", "").upper() == result.upper()]
+    if q:
+        q_low = q.lower()
+        logs = [
+            l for l in logs
+            if q_low in (l.get("package") or "").lower()
+            or q_low in (l.get("user") or "").lower()
+            or q_low in (l.get("detail") or "").lower()
+        ]
     return paginate(logs, page=page, per_page=per_page)
 
 

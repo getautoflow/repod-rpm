@@ -247,6 +247,10 @@ DEFAULT_SOURCES = [
 def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+    # WAL mode : permet plusieurs lecteurs simultanés + 1 écrivain sans blocage.
+    # Indispensable avec plusieurs workers uvicorn qui partagent le même fichier.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -272,8 +276,8 @@ def init_db():
                 provides    TEXT,
                 synced_at   TEXT NOT NULL
             );
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_pkg_source_name_ver
-                ON packages(source_id, name, version);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pkg_source_name_ver_arch
+                ON packages(source_id, name, version, arch);
             CREATE INDEX IF NOT EXISTS idx_pkg_name ON packages(name);
 
             CREATE TABLE IF NOT EXISTS sync_log (
@@ -303,6 +307,16 @@ def init_db():
                 FOREIGN KEY (group_name) REFERENCES import_groups(name) ON DELETE CASCADE
             );
         """)
+        # Migration: drop old index that omitted arch, causing arch variants to overwrite each other
+        old_idx = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_pkg_source_name_ver'"
+        ).fetchone()
+        if old_idx:
+            conn.execute("DROP INDEX IF EXISTS idx_pkg_source_name_ver")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_pkg_source_name_ver_arch"
+                " ON packages(source_id, name, version, arch)"
+            )
         # Migration : ajout de la colonne provides si absente (bases existantes)
         try:
             conn.execute("ALTER TABLE packages ADD COLUMN provides TEXT")
@@ -496,7 +510,11 @@ def _stream_parse_primary_xml(xml_bytes: bytes, source_id: str, batch_size: int 
                 if batch or first_batch:
                     _flush(conn, clear_table=first_batch)
 
-    except Exception:
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger("package_index").error(
+            f"[_stream_parse_primary_xml] {source_id}: {type(exc).__name__}: {exc}"
+        )
         return -1
 
     return total
@@ -637,7 +655,11 @@ def _stream_download_and_parse(url: str, source_id: str,
                     if batch or first_batch:
                         _flush(conn, clear_table=first_batch)
 
-    except Exception:
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger("package_index").error(
+            f"[_stream_download_and_parse] {source_id}: {type(exc).__name__}: {exc}"
+        )
         return -1
 
     return total
@@ -655,7 +677,16 @@ def sync_source(source: dict) -> dict:
       3. Parser avec iterparse directement depuis le flux → 0 byte chargé en RAM
          → supporte les grands primary.xml (Oracle Linux 8 BaseOS ≈ 600 MB XML)
     """
-    init_db()
+    try:
+        init_db()
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger("package_index").error(f"[init_db] {exc}")
+        source_id = source["id"]
+        err = f"Erreur d'initialisation de la base ({type(exc).__name__}: {exc})"
+        _log_sync(source_id, "error", 0, err)
+        return {"source_id": source_id, "status": "error", "error": err}
+
     source_id  = source["id"]
     repomd_url = source.get("repomd_url", "")
 
@@ -710,7 +741,8 @@ def get_package_info(name: str) -> dict | None:
     init_db()
     with _get_db() as conn:
         row = conn.execute(
-            "SELECT * FROM packages WHERE name = ? ORDER BY synced_at DESC LIMIT 1",
+            """SELECT * FROM packages WHERE name = ?
+               ORDER BY CASE WHEN arch = 'x86_64' THEN 0 ELSE 1 END, synced_at DESC LIMIT 1""",
             (name,),
         ).fetchone()
     return dict(row) if row else None
@@ -733,7 +765,7 @@ def resolve_provide_to_package(provide: str) -> dict | None:
         row = conn.execute(
             """SELECT * FROM packages
                WHERE provides LIKE ?
-               ORDER BY synced_at DESC LIMIT 1""",
+               ORDER BY CASE WHEN arch = 'x86_64' THEN 0 ELSE 1 END, synced_at DESC LIMIT 1""",
             (f"%{provide}%",),
         ).fetchone()
     return dict(row) if row else None

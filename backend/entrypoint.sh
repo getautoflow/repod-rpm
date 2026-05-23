@@ -83,6 +83,13 @@ if [ -f "$AUTH_DB" ]; then
     chown appuser:appuser "$AUTH_DB" 2>/dev/null || chmod 666 "$AUTH_DB" 2>/dev/null || true
 fi
 
+# Correction explicite des permissions sur la base SQLite des packages-index
+# (peut se retrouver owned by root si docker exec a été utilisé pour des tests)
+PKG_DB="${INDEX_DIR:-/repos/package-index}/packages.db"
+if [ -f "$PKG_DB" ]; then
+    chown appuser:appuser "$PKG_DB" 2>/dev/null || chmod 666 "$PKG_DB" 2>/dev/null || true
+fi
+
 SETTINGS_FILE="${SETTINGS_PATH:-/repos/settings.json}"
 SETTINGS_DIR="$(dirname "$SETTINGS_FILE")"
 chown appuser:appuser "$SETTINGS_DIR" 2>/dev/null || true

@@ -156,7 +156,7 @@ function ResolvePanel({ pkg, onClose, onResolved }) {
 
     const token = localStorage.getItem("token");
     try {
-      const resp = await fetch(`${API_URL}/import/batch`, {
+      const resp = await fetch(`${API_URL}/api/v1/import/batch`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({

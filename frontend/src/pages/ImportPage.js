@@ -298,7 +298,7 @@ function SearchImportTab() {
     setDone(false);
     const token = localStorage.getItem("token");
     try {
-      const resp = await fetch(`${API_URL}/import/`, {
+      const resp = await fetch(`${API_URL}/api/v1/import/`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ package: selected.name, distribution, with_deps: true }),
@@ -498,7 +498,7 @@ function BatchImportTab() {
     for (const pkg of packages) {
       setLogs((prev) => [...prev, `info|Import de ${pkg}…`]);
       try {
-        const resp = await fetch(`${API_URL}/import/`, {
+        const resp = await fetch(`${API_URL}/api/v1/import/`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ package: pkg, distribution, with_deps: true }),
@@ -611,7 +611,7 @@ function SyncTab() {
   };
 
   const handleSyncAll = () => {
-    startWithBody(`${API_URL}/import/sync`, {});
+    startWithBody(`${API_URL}/api/v1/import/sync`, {});
   };
 
   const totalPackages = sources.reduce((acc, s) => acc + (s.pkg_count || 0), 0);
