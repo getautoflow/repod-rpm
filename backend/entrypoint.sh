@@ -62,12 +62,15 @@ for DIR in \
     fi
 done
 
-# Répertoires distributions RPM
-for DISTRO in almalinux8 rocky8 centos-stream9 oraclelinux8 fedora \
+# Répertoires distributions RPM — créer si absents PUIS corriger ownership
+# (Docker crée les bind-mounts manquants en root:root, appuser ne peut pas écrire)
+for DISTRO in almalinux8 almalinux9 rocky8 rocky9 centos-stream9 oraclelinux8 fedora \
               opensuse-leap-15.5 opensuse-leap-15.6 opensuse-leap opensuse-tumbleweed; do
-    if [ -d "/repos/${DISTRO}" ]; then
-        chown -R appuser:appuser "/repos/${DISTRO}" 2>/dev/null || true
-    fi
+    DPATH="/repos/${DISTRO}"
+    for ARCH in x86_64 aarch64 noarch; do
+        mkdir -p "${DPATH}/${ARCH}/repodata" 2>/dev/null || true
+    done
+    chown -R appuser:appuser "${DPATH}" 2>/dev/null || true
 done
 
 GNUPG_DIR="${GNUPG_HOME:-/repos/gnupg}"

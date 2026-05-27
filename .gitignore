@@ -21,12 +21,8 @@ repos/settings.json
 gnupg/
 repos/gnupg/
 
-# Clés SSH
-backend/ssh/id_*
-backend/ssh/*.pem
-backend/ssh/*.key
-backend/ssh/known_hosts
-backend/ssh/known_hosts.old
+# Clés SSH — répertoire entier
+backend/ssh/
 
 # Certificats
 *.p12
@@ -96,6 +92,8 @@ venv/
 env/
 ENV/
 .pytest_cache/
+backend/.pytest_cache/
+backend/.ruff_cache/
 .mypy_cache/
 .ruff_cache/
 htmlcov/

@@ -376,7 +376,13 @@ def init_distribution(codename: str) -> tuple[bool, str]:
     errors = []
     for arch in ["x86_64", "aarch64", "noarch"]:
         distrib_path = _distrib_dir(codename, arch)
-        distrib_path.mkdir(parents=True, exist_ok=True)
+        try:
+            distrib_path.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            # Le dossier existe mais est owned par root (Docker bind-mount auto-créé).
+            # L'entrypoint.sh corrige cela au prochain redémarrage via chown + mkdir.
+            errors.append(f"{arch}: permission refusée — {exc}")
+            continue
 
         repomd = distrib_path / "repodata" / "repomd.xml"
         if not repomd.exists():

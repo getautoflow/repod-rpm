@@ -1,0 +1,353 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Release — repod-rpm
+# ─────────────────────────────────────────────────────────────────────────────
+# Déclenché uniquement sur un tag v* poussé sur main.
+#
+# Jobs (séquentiels) :
+#   1. verify   → lint (ruff) + pytest — même config que ci.yml
+#   2. publish  → build & push 3 images vers GHCR (matrix)
+#                   ghcr.io/getautoflow/repod-rpm-repo:{tag,latest}
+#                   ghcr.io/getautoflow/repod-rpm-backend:{tag,latest}
+#                   ghcr.io/getautoflow/repod-rpm-frontend:{tag,latest}
+#   3. release  → génère docker-compose.release.yml avec images GHCR
+#                 calcule SHA256 des artefacts
+#                 crée la GitHub Release avec les fichiers joints
+#
+# Secrets requis (aucun secret supplémentaire — GITHUB_TOKEN suffit) :
+#   GITHUB_TOKEN est disponible automatiquement dans tous les workflows.
+#   GHCR utilise ce token : pas besoin de DOCKER_USERNAME / DOCKER_PASSWORD.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]*"   # v1.0.0, v1.2.3-rc1, etc.
+
+# Un seul run par tag à la fois
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # Ne jamais annuler une release en cours
+
+jobs:
+
+  # ── 1. Verify — lint + tests avant tout push ────────────────────────────────
+  verify:
+    name: Verify (${{ matrix.check }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        check: [lint, test]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install ruff==0.4.4 pytest pytest-asyncio pytest-cov
+
+      # Lint
+      - name: Lint (ruff)
+        if: matrix.check == 'lint'
+        run: |
+          ruff check backend/ \
+            --select E,F,W,I \
+            --ignore E501,E402,F401 \
+            --output-format github
+
+      # Tests
+      - name: Run pytest
+        if: matrix.check == 'test'
+        working-directory: backend
+        env:
+          MANIFEST_DIR: /tmp/repod-test/manifests
+          POOL_DIR: /tmp/repod-test/pool
+          STAGING_INCOMING: /tmp/repod-test/staging/incoming
+          STAGING_QUARANTINE: /tmp/repod-test/staging/quarantine
+          AUDIT_DIR: /tmp/repod-test/audit
+          INDEX_PATH: /tmp/repod-test/manifests/index.json
+          AUTH_DB_PATH: /tmp/repod-test/auth/users.db
+          SETTINGS_PATH: /tmp/repod-test/settings.json
+          SECURITY_CACHE_DIR: /tmp/repod-test/security
+          INDEX_DIR: /tmp/repod-test/package-index
+          WEBHOOK_SECRET: ci-test-webhook-secret
+        run: |
+          pytest tests/ --tb=short -q
+
+  # ── 2. Publish — build & push images vers GHCR ──────────────────────────────
+  publish:
+    name: Publish ${{ matrix.service }} → GHCR
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # nécessaire pour pousser sur ghcr.io
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: repod-rpm-repo
+            context: .
+            dockerfile: ./Dockerfile
+            build_args: ""
+          - service: repod-rpm-backend
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+            build_args: ""
+          - service: repod-rpm-frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+            build_args: |
+              REACT_APP_API_URL=
+              REACT_APP_REPO_URL=http://localhost:80
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Génère les tags : ghcr.io/getautoflow/repod-rpm-backend:v1.0.0
+      #                   ghcr.io/getautoflow/repod-rpm-backend:1.0
+      #                   ghcr.io/getautoflow/repod-rpm-backend:latest
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.service }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build & push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          build-args: ${{ matrix.build_args }}
+
+  # ── 3. Release — artefacts + GitHub Release ─────────────────────────────────
+  release:
+    name: GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # nécessaire pour créer la release et uploader les assets
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Extraire la version depuis le tag (ex: v1.0.0 → 1.0.0) ─────────────
+      - name: Extract version
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"            # v1.0.0
+          VERSION="${TAG#v}"                  # 1.0.0
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # ── Générer le docker-compose prêt à l'emploi avec images GHCR ──────────
+      - name: Generate docker-compose.release.yml
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          cat > /tmp/docker-compose.release.yml << EOF
+          # ─────────────────────────────────────────────────────────────────────
+          # Repod RPM Community Edition — ${TAG}
+          # Images pré-buildées depuis GHCR — aucun build local requis.
+          #
+          # Démarrage rapide :
+          #   cp .env.example .env && cp backend.env.example backend.env
+          #   # Éditer backend.env : JWT_SECRET_KEY et ADMIN_PASSWORD_HASH
+          #   docker compose -f docker-compose.release.yml up -d
+          # ─────────────────────────────────────────────────────────────────────
+
+          services:
+
+            rpm-repo:
+              image: ghcr.io/${OWNER}/repod-rpm-repo:${VERSION}
+              container_name: repod-rpm-repo
+              ports:
+                - "\${BIND_HOST:-0.0.0.0}:\${RPM_PORT:-8180}:80"
+              volumes:
+                - ./.gnupg:/root/.gnupg:rw
+                - ./repos/gnupg:/repos/gnupg:rw
+                - ./repos/almalinux8:/usr/share/nginx/html/repos/almalinux8
+                - ./repos/almalinux9:/usr/share/nginx/html/repos/almalinux9
+                - ./repos/rocky8:/usr/share/nginx/html/repos/rocky8
+                - ./repos/rocky9:/usr/share/nginx/html/repos/rocky9
+                - ./repos/centos-stream9:/usr/share/nginx/html/repos/centos-stream9
+                - ./repos/oraclelinux8:/usr/share/nginx/html/repos/oraclelinux8
+                - ./repos/fedora:/usr/share/nginx/html/repos/fedora
+                - ./repos/opensuse-leap-15.6:/usr/share/nginx/html/repos/opensuse-leap-15.6
+                - ./repos/opensuse-tumbleweed:/usr/share/nginx/html/repos/opensuse-tumbleweed
+                - ./nginx/repo.conf:/etc/nginx/conf.d/repo.conf:ro
+                - ./repos/logs:/var/log/nginx
+              restart: unless-stopped
+
+            backend:
+              image: ghcr.io/${OWNER}/repod-rpm-backend:${VERSION}
+              container_name: repod-rpm-backend
+              depends_on:
+                - rpm-repo
+              env_file: backend.env
+              environment:
+                ENV: production
+                POOL_DIR: /repos/pool
+                MANIFEST_DIR: /repos/manifests
+                STAGING_INCOMING: /repos/staging/incoming
+                STAGING_QUARANTINE: /repos/staging/quarantine
+                AUDIT_DIR: /repos/audit
+                INDEX_PATH: /repos/manifests/index.json
+                INDEX_DIR: /repos/package-index
+                IMPORTS_DIR: /repos/imports
+                CLAMAV_DB_DIR: /var/lib/clamav
+                AUTH_DB_PATH: /repos/auth/users.db
+                SETTINGS_PATH: /repos/settings.json
+                GRYPE_DB_CACHE_DIR: /repos/grype-db
+                SECURITY_DIR: /repos/security
+                NGINX_LOGS_DIR: /repos/logs
+                GNUPG_HOME: /repos/gnupg
+                REPO_BASE: /repos
+              volumes:
+                - ./repos/pool:/repos/pool
+                - ./repos/manifests:/repos/manifests
+                - ./repos/staging:/repos/staging
+                - ./repos/audit:/repos/audit
+                - ./repos/package-index:/repos/package-index
+                - ./repos/imports:/repos/imports
+                - ./repos/clamav-db:/var/lib/clamav
+                - ./repos/grype-db:/repos/grype-db
+                - ./repos/auth:/repos/auth
+                - ./repos/security:/repos/security
+                - ./repos/logs:/repos/logs
+                - ./repos/gnupg:/repos/gnupg:rw
+                - ./repos/almalinux8:/repos/almalinux8:rw
+                - ./repos/almalinux9:/repos/almalinux9:rw
+                - ./repos/rocky8:/repos/rocky8:rw
+                - ./repos/rocky9:/repos/rocky9:rw
+                - ./repos/centos-stream9:/repos/centos-stream9:rw
+                - ./repos/oraclelinux8:/repos/oraclelinux8:rw
+                - ./repos/fedora:/repos/fedora:rw
+                - ./repos/opensuse-leap-15.6:/repos/opensuse-leap-15.6:rw
+                - ./repos/opensuse-tumbleweed:/repos/opensuse-tumbleweed:rw
+              ports:
+                - "\${BIND_HOST:-0.0.0.0}:\${BACKEND_PORT:-8100}:8000"
+              restart: unless-stopped
+
+            frontend:
+              image: ghcr.io/${OWNER}/repod-rpm-frontend:${VERSION}
+              container_name: repod-rpm-frontend
+              depends_on:
+                - backend
+              ports:
+                - "\${BIND_HOST:-0.0.0.0}:\${FRONTEND_PORT:-3103}:80"
+              restart: unless-stopped
+          EOF
+
+          # Dé-indenter (le heredoc ajoute 10 espaces à cause du run: |)
+          sed -i 's/^          //' /tmp/docker-compose.release.yml
+
+      # ── SHA256 des artefacts ─────────────────────────────────────────────────
+      - name: Compute SHA256 checksums
+        run: |
+          cd /tmp
+          sha256sum docker-compose.release.yml > SHA256SUMS
+          cd "$GITHUB_WORKSPACE"
+          sha256sum .env.example backend.env.example >> /tmp/SHA256SUMS
+          cat /tmp/SHA256SUMS
+
+      # ── Extraire les notes de la version depuis CHANGELOG.md ─────────────────
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Extraire le bloc entre ## [VERSION] et le prochain ## [
+          python3 - << 'PYEOF'
+          import re, os
+
+          version = os.environ["VERSION"]
+          with open("CHANGELOG.md") as f:
+              content = f.read()
+
+          pattern = rf"## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n## \[|\Z)"
+          match = re.search(pattern, content, re.DOTALL)
+          notes = match.group(1).strip() if match else f"Release {version}"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              # GitHub Output supporte les multilignes via délimiteur
+              delimiter = "RELEASE_NOTES_EOF"
+              out.write(f"notes<<{delimiter}\n{notes}\n{delimiter}\n")
+          PYEOF
+
+      # ── Créer la GitHub Release ──────────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Repod RPM Community ${{ steps.version.outputs.tag }}"
+          body: |
+            ## Docker images (GHCR)
+
+            ```
+            ghcr.io/${{ github.repository_owner }}/repod-rpm-repo:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/repod-rpm-backend:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/repod-rpm-frontend:${{ steps.version.outputs.version }}
+            ```
+
+            ## Quick start
+
+            ```bash
+            # 1. Télécharger les fichiers de configuration
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/docker-compose.release.yml
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/.env.example
+            curl -LO https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.tag }}/backend.env.example
+
+            # 2. Configurer
+            cp .env.example .env
+            cp backend.env.example backend.env
+            # Éditer backend.env : JWT_SECRET_KEY et ADMIN_PASSWORD_HASH
+
+            # 3. Démarrer
+            docker compose -f docker-compose.release.yml up -d
+            ```
+
+            ## Changelog
+
+            ${{ steps.notes.outputs.notes }}
+
+          files: |
+            /tmp/docker-compose.release.yml
+            .env.example
+            backend.env.example
+            /tmp/SHA256SUMS
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}

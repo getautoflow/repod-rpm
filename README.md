@@ -119,3 +119,37 @@ BIND_HOST=127.0.0.1 docker compose up -d
 ---
 
 Projet dérivé de **Repod-deb** — mêmes principes, même stack, pour l'écosystème RPM.
+
+---
+
+## Licenses / Licences
+
+The repod source code (backend and frontend) is licensed under the
+**Apache License 2.0** — see [LICENSE](./LICENSE).
+
+Le code source de repod (backend et frontend) est distribué sous la
+**Licence Apache 2.0** — voir [LICENSE](./LICENSE).
+
+### Third-party components / Composants tiers
+
+repod's Docker image integrates the following third-party tools,
+each distributed under their own license:
+
+| Component | License | Usage | Source |
+|-----------|---------|-------|--------|
+| [createrepo_c](https://github.com/rpm-software-management/createrepo_c) | GPL v2 | RPM repo indexing — subprocess exec | [Source](https://github.com/rpm-software-management/createrepo_c) |
+| [rpm](https://github.com/rpm-software-management/rpm) | GPL v2 / LGPL v2 | RPM package querying — subprocess exec | [Source](https://github.com/rpm-software-management/rpm) |
+| [ClamAV](https://www.clamav.net/) | GPL v2 | Antivirus scanning — Unix socket (clamd) | [Source](https://github.com/Cisco-Talos/clamav) |
+| [Grype](https://github.com/anchore/grype) | Apache 2.0 | CVE vulnerability scanning | [Source](https://github.com/anchore/grype) |
+| [Syft](https://github.com/anchore/syft) | Apache 2.0 | SBOM generation | [Source](https://github.com/anchore/syft) |
+| [FastAPI](https://fastapi.tiangolo.com/) | MIT | Backend web framework | [Source](https://github.com/tiangolo/fastapi) |
+| [React](https://react.dev/) | MIT | Frontend UI library | [Source](https://github.com/facebook/react) |
+| [Tailwind CSS](https://tailwindcss.com/) | MIT | Frontend CSS framework | [Source](https://github.com/tailwindlabs/tailwindcss) |
+
+createrepo_c, rpm, and ClamAV are invoked as **independent processes**
+(subprocess exec and Unix socket respectively) and are **not statically or
+dynamically linked** against repod's code. Full GPL v2 source is available
+at the upstream repositories listed above.
+
+See [NOTICES](./NOTICES) for the complete list of third-party attributions
+and [LICENSES/](./LICENSES/) for the full license texts.

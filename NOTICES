@@ -1,0 +1,179 @@
+repod — RPM Repository Manager
+Copyright 2024-present repod contributors
+Licensed under the Apache License, Version 2.0 (see LICENSE)
+
+================================================================================
+THIRD-PARTY COMPONENTS
+================================================================================
+This product includes or integrates the following third-party software.
+Each component is governed by its own license as indicated below.
+Full license texts are available in the LICENSES/ directory.
+
+────────────────────────────────────────────────────────────────────────────────
+GNU GENERAL PUBLIC LICENSE v2 (LICENSES/GPL-2.0.txt)
+────────────────────────────────────────────────────────────────────────────────
+
+createrepo_c
+  Description : RPM repository metadata generation tool (C rewrite of createrepo)
+  Copyright   : 2012-present Tomas Mlcoch / Fedora Project contributors
+  Source      : https://github.com/rpm-software-management/createrepo_c
+  Usage       : Invoked as an independent subprocess (exec); not linked.
+
+rpm
+  Description : RPM Package Manager — package query and verification tooling
+  Copyright   : 1998-present Red Hat, Inc. and contributors
+  Source      : https://github.com/rpm-software-management/rpm
+  Usage       : Invoked as an independent subprocess (exec); not linked.
+
+ClamAV
+  Description : Open-source antivirus engine
+  Copyright   : Cisco Systems, Inc. and/or its affiliates
+  Source      : https://github.com/Cisco-Talos/clamav
+  Usage       : Accessed via clamd Unix socket; not linked.
+
+────────────────────────────────────────────────────────────────────────────────
+APACHE LICENSE 2.0 (see LICENSE at project root)
+────────────────────────────────────────────────────────────────────────────────
+
+Grype
+  Description : Vulnerability scanner for container images and filesystems
+  Copyright   : 2020-present Anchore, Inc.
+  Source      : https://github.com/anchore/grype
+
+Syft
+  Description : SBOM (Software Bill of Materials) generator
+  Copyright   : 2020-present Anchore, Inc.
+  Source      : https://github.com/anchore/syft
+
+Requests
+  Description : HTTP library for Python
+  Copyright   : 2011-present Kenneth Reitz and contributors
+  Source      : https://github.com/psf/requests
+
+python-multipart
+  Description : Streaming multipart form data parser for Python
+  Copyright   : Andrew Dunham and contributors
+  Source      : https://github.com/Kludex/python-multipart
+
+Prometheus Client (Python)
+  Description : Prometheus instrumentation library for Python
+  Copyright   : 2015-present Brian Brazil and contributors
+  Source      : https://github.com/prometheus/client_python
+
+────────────────────────────────────────────────────────────────────────────────
+MIT LICENSE (LICENSES/MIT.txt)
+────────────────────────────────────────────────────────────────────────────────
+
+FastAPI
+  Description : Modern, fast web framework for building APIs with Python
+  Copyright   : 2018-present Sebastián Ramírez
+  Source      : https://github.com/tiangolo/fastapi
+
+Pydantic
+  Description : Data validation using Python type annotations
+  Copyright   : 2017-present Samuel Colvin and contributors
+  Source      : https://github.com/pydantic/pydantic
+
+APScheduler
+  Description : Advanced Python Scheduler
+  Copyright   : 2009-present Alex Grönholm
+  Source      : https://github.com/agronholm/apscheduler
+
+python-jose
+  Description : JavaScript Object Signing and Encryption implementation
+  Copyright   : Michael Davis and contributors
+  Source      : https://github.com/mpdavis/python-jose
+
+pyotp
+  Description : Python TOTP/HOTP library
+  Copyright   : 2011-present Mark Percival and contributors
+  Source      : https://github.com/pyotp/pyotp
+
+slowapi
+  Description : Rate limiting extension for FastAPI/Starlette
+  Copyright   : Reza Shabani and contributors
+  Source      : https://github.com/laurentS/slowapi
+
+React
+  Description : JavaScript library for building user interfaces
+  Copyright   : Meta Platforms, Inc. and affiliates
+  Source      : https://github.com/facebook/react
+
+Tailwind CSS
+  Description : Utility-first CSS framework
+  Copyright   : Tailwind Labs, Inc.
+  Source      : https://github.com/tailwindlabs/tailwindcss
+
+axios
+  Description : Promise-based HTTP client for the browser and Node.js
+  Copyright   : 2014-present Matt Zabriskie & Collaborators
+  Source      : https://github.com/axios/axios
+
+react-hot-toast
+  Description : Lightweight notifications library for React
+  Copyright   : 2021 Timo Lins
+  Source      : https://github.com/timolins/react-hot-toast
+
+react-router-dom
+  Description : Declarative routing for React web applications
+  Copyright   : Remix Software, Inc. and contributors
+  Source      : https://github.com/remix-run/react-router
+
+react-dropzone
+  Description : React hook for drag-and-drop file upload
+  Copyright   : Param Aggarwal and contributors
+  Source      : https://github.com/react-dropzone/react-dropzone
+
+recharts
+  Description : Composable charting library built with React
+  Copyright   : recharts contributors
+  Source      : https://github.com/recharts/recharts
+
+react-grid-layout
+  Description : Draggable and resizable grid layout for React
+  Copyright   : STRML and contributors
+  Source      : https://github.com/react-grid-layout/react-grid-layout
+
+qrcode (Python)
+  Description : QR Code generator for Python
+  Copyright   : Lincoln Loop and contributors
+  Source      : https://github.com/lincolnloop/python-qrcode
+
+python-dotenv
+  Description : Read .env files into os.environ
+  Copyright   : Saurabh Kumar and contributors
+  Source      : https://github.com/theskumar/python-dotenv
+
+python-json-logger
+  Description : JSON log formatter for Python
+  Copyright   : 2016 Zakaria Zajac
+  Source      : https://github.com/madzak/python-json-logger
+
+────────────────────────────────────────────────────────────────────────────────
+BSD LICENSES
+────────────────────────────────────────────────────────────────────────────────
+
+Uvicorn (BSD-3-Clause)
+  Description : ASGI web server implementation for Python
+  Copyright   : 2017-present Encode OSS Ltd.
+  Source      : https://github.com/encode/uvicorn
+
+Pillow (HPND)
+  Description : Python Imaging Library fork
+  Copyright   : 1997-2011 Secret Labs AB; 1995-2011 Fredrik Lundh;
+                2010-present Alex Clark and contributors
+  Source      : https://github.com/python-pillow/Pillow
+
+zstandard (BSD-3-Clause)
+  Description : Zstandard compression library bindings for Python
+  Copyright   : 2016-present Gregory Szorc
+  Source      : https://github.com/indygreg/python-zstandard
+
+ldap3 (LGPL v3)
+  Description : Pure-Python LDAP v3 client library
+  Copyright   : 2013-present Giovanni Cannata
+  Source      : https://github.com/cannatag/ldap3
+  Note        : LGPL v3 — dynamically imported; user may replace with
+                any LGPL-compatible implementation.
+
+================================================================================
